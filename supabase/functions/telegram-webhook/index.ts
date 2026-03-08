@@ -120,17 +120,24 @@ serve(async (req) => {
 
   try {
     const url = new URL(req.url);
+    console.log("Webhook called, full URL:", req.url);
+    console.log("Pathname:", url.pathname);
+    
     // Extract bot token from URL path: /telegram-webhook/<bot_token>
     const pathParts = url.pathname.split("/");
     const botToken = pathParts[pathParts.length - 1];
+    
+    console.log("Extracted bot token:", botToken ? botToken.substring(0, 10) + "..." : "NONE");
 
     if (!botToken || botToken === "telegram-webhook") {
+      console.log("No bot token in path");
       return new Response(JSON.stringify({ error: "Bot token required in URL path" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     const update = await req.json();
+    console.log("Update received:", JSON.stringify(update).substring(0, 500));
     const message = update.message;
     if (!message) {
       return new Response(JSON.stringify({ ok: true }), {
