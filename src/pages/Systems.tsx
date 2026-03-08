@@ -13,6 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import GlowCard from "@/components/GlowCard";
 import StatusBadge from "@/components/StatusBadge";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 
 type SystemType = "bot" | "account";
 type SystemStatus = "online" | "offline" | "error";
@@ -26,40 +27,20 @@ interface ConnectedSystem {
   lastChecked: string;
 }
 
-interface ScheduledTask {
-  id: string;
-  chatId: string;
-  message: string;
-  time: string;
-  repeat: string;
-  enabled: boolean;
-}
-
-interface AutoDeleteRule {
-  id: string;
-  chatId: string;
-  delay: string;
-  enabled: boolean;
-}
+interface AllowedUser { id: string; telegram_user_id: string; }
+interface AllowedGroup { id: string; telegram_chat_id: string; }
+interface Channel { id: string; username: string; }
+interface ScheduledTask { id: string; chat_id: string; message: string; scheduled_time: string; repeat_interval: string; enabled: boolean; }
+interface AutoDeleteRule { id: string; chat_id: string; delay: string; enabled: boolean; }
 
 type View = "list" | "create-choose" | "create-bot" | "create-account" | "manage";
-
-// localStorage helpers
-function loadJSON<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch { return fallback; }
-}
-function saveJSON(key: string, value: unknown) {
-  localStorage.setItem(key, JSON.stringify(value));
-}
 
 const Systems = () => {
   const [dark, setDark] = useState(() => document.documentElement.classList.contains("dark"));
   const [view, setView] = useState<View>("list");
-  const [systems, setSystems] = useState<ConnectedSystem[]>(() => loadJSON("tg_systems", []));
+  const [systems, setSystems] = useState<ConnectedSystem[]>([]);
   const [managingSystem, setManagingSystem] = useState<ConnectedSystem | null>(null);
+  const [loading, setLoading] = useState(true);
 
   const [botToken, setBotToken] = useState("");
   const [checkingBot, setCheckingBot] = useState(false);
@@ -70,20 +51,20 @@ const Systems = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Access control
-  const [allowedUsers, setAllowedUsers] = useState<Record<string, string[]>>(() => loadJSON("tg_allowedUsers", {}));
-  const [allowedGroups, setAllowedGroups] = useState<Record<string, string[]>>(() => loadJSON("tg_allowedGroups", {}));
+  const [allowedUsers, setAllowedUsers] = useState<AllowedUser[]>([]);
+  const [allowedGroups, setAllowedGroups] = useState<AllowedGroup[]>([]);
   const [addingUser, setAddingUser] = useState(false);
   const [addingGroup, setAddingGroup] = useState(false);
   const [newUserId, setNewUserId] = useState("");
   const [newGroupId, setNewGroupId] = useState("");
 
   // Channels
-  const [channels, setChannels] = useState<Record<string, string[]>>(() => loadJSON("tg_channels", {}));
+  const [channels, setChannels] = useState<Channel[]>([]);
   const [addingChannel, setAddingChannel] = useState(false);
   const [newChannel, setNewChannel] = useState("");
 
   // Scheduler
-  const [scheduledTasks, setScheduledTasks] = useState<Record<string, ScheduledTask[]>>(() => loadJSON("tg_scheduledTasks", {}));
+  const [scheduledTasks, setScheduledTasks] = useState<ScheduledTask[]>([]);
   const [addingTask, setAddingTask] = useState(false);
   const [newTaskChatId, setNewTaskChatId] = useState("");
   const [newTaskMessage, setNewTaskMessage] = useState("");
@@ -91,18 +72,48 @@ const Systems = () => {
   const [newTaskRepeat, setNewTaskRepeat] = useState("once");
 
   // Auto-delete
-  const [autoDeleteRules, setAutoDeleteRules] = useState<Record<string, AutoDeleteRule[]>>(() => loadJSON("tg_autoDeleteRules", {}));
+  const [autoDeleteRules, setAutoDeleteRules] = useState<AutoDeleteRule[]>([]);
   const [addingRule, setAddingRule] = useState(false);
   const [newRuleChatId, setNewRuleChatId] = useState("");
   const [newRuleDelay, setNewRuleDelay] = useState("5m");
 
-  // Persist to localStorage
-  useEffect(() => { saveJSON("tg_systems", systems); }, [systems]);
-  useEffect(() => { saveJSON("tg_allowedUsers", allowedUsers); }, [allowedUsers]);
-  useEffect(() => { saveJSON("tg_allowedGroups", allowedGroups); }, [allowedGroups]);
-  useEffect(() => { saveJSON("tg_channels", channels); }, [channels]);
-  useEffect(() => { saveJSON("tg_scheduledTasks", scheduledTasks); }, [scheduledTasks]);
-  useEffect(() => { saveJSON("tg_autoDeleteRules", autoDeleteRules); }, [autoDeleteRules]);
+  // Load systems from DB
+  useEffect(() => {
+    const load = async () => {
+      const { data } = await supabase.from("systems").select("*").order("created_at");
+      if (data) {
+        setSystems(data.map((s) => ({
+          id: s.id, type: s.type as SystemType, label: s.label,
+          username: s.username ?? undefined, status: (s.status as SystemStatus) || "offline",
+          lastChecked: s.last_checked ? new Date(s.last_checked).toLocaleTimeString("en-US", { hour12: false }) : "",
+        })));
+      }
+      setLoading(false);
+    };
+    load();
+  }, []);
+
+  // Load related data when managing a system
+  const sysId = managingSystem?.id || "";
+
+  const loadSystemData = useCallback(async (id: string) => {
+    const [u, g, c, t, r] = await Promise.all([
+      supabase.from("allowed_users").select("id, telegram_user_id").eq("system_id", id),
+      supabase.from("allowed_groups").select("id, telegram_chat_id").eq("system_id", id),
+      supabase.from("channels").select("id, username").eq("system_id", id),
+      supabase.from("scheduled_tasks").select("id, chat_id, message, scheduled_time, repeat_interval, enabled").eq("system_id", id),
+      supabase.from("auto_delete_rules").select("id, chat_id, delay, enabled").eq("system_id", id),
+    ]);
+    if (u.data) setAllowedUsers(u.data);
+    if (g.data) setAllowedGroups(g.data);
+    if (c.data) setChannels(c.data);
+    if (t.data) setScheduledTasks(t.data);
+    if (r.data) setAutoDeleteRules(r.data);
+  }, []);
+
+  useEffect(() => {
+    if (sysId) loadSystemData(sysId);
+  }, [sysId, loadSystemData]);
 
   const now = () => new Date().toLocaleTimeString("en-US", { hour12: false });
 
@@ -121,17 +132,26 @@ const Systems = () => {
       const data = await res.json();
       if (!data.ok) { toast.error("Invalid bot token."); return; }
       const bot = data.result;
-      setSystems((prev) => [...prev, { id: Date.now().toString(), type: "bot", label: bot.first_name, username: `@${bot.username}`, status: "online", lastChecked: now() }]);
+      const { data: inserted, error } = await supabase.from("systems").insert({
+        type: "bot", label: bot.first_name, username: `@${bot.username}`, status: "online", bot_token: botToken,
+      }).select().single();
+      if (error) { toast.error("DB error."); return; }
+      setSystems((prev) => [...prev, { id: inserted.id, type: "bot", label: bot.first_name, username: `@${bot.username}`, status: "online", lastChecked: now() }]);
       toast.success(`Connected: @${bot.username}`);
       setBotToken("");
       setView("list");
     } catch { toast.error("Network error."); } finally { setCheckingBot(false); }
   };
 
-  const connectAccount = () => {
+  const connectAccount = async () => {
     if (!apiId.trim() || !apiHash.trim()) { toast.error("API ID and Hash required."); return; }
     if (!stringSession.trim() && !sessionFile) { toast.error("Provide session string or file."); return; }
-    setSystems((prev) => [...prev, { id: Date.now().toString(), type: "account", label: sessionFile ? sessionFile.name : `Account_${apiId}`, status: "online", lastChecked: now() }]);
+    const label = sessionFile ? sessionFile.name : `Account_${apiId}`;
+    const { data: inserted, error } = await supabase.from("systems").insert({
+      type: "account", label, status: "online", api_id: apiId, api_hash: apiHash, string_session: stringSession || null,
+    }).select().single();
+    if (error) { toast.error("DB error."); return; }
+    setSystems((prev) => [...prev, { id: inserted.id, type: "account", label, status: "online", lastChecked: now() }]);
     toast.success("Account connected!");
     setApiId(""); setApiHash(""); setStringSession(""); setSessionFile(null);
     setView("list");
@@ -144,81 +164,95 @@ const Systems = () => {
     setSessionFile(file);
   };
 
-  const removeSystem = (id: string) => {
+  const removeSystem = async (id: string) => {
+    await supabase.from("systems").delete().eq("id", id);
     setSystems((prev) => prev.filter((s) => s.id !== id));
     if (managingSystem?.id === id) { setManagingSystem(null); setView("list"); }
     toast.success("Removed.");
   };
 
-  const refreshStatus = (id: string) => {
+  const refreshStatus = async (id: string) => {
+    await supabase.from("systems").update({ last_checked: new Date().toISOString() }).eq("id", id);
     setSystems((prev) => prev.map((s) => s.id === id ? { ...s, lastChecked: now() } : s));
   };
 
-  const sysId = managingSystem?.id || "";
-
-  const addUser = () => {
+  // ─── CRUD helpers ───
+  const addUser = async () => {
     if (!newUserId.trim()) return;
-    setAllowedUsers((prev) => ({ ...prev, [sysId]: [...(prev[sysId] || []), newUserId.trim()] }));
+    const { data, error } = await supabase.from("allowed_users").insert({ system_id: sysId, telegram_user_id: newUserId.trim() }).select().single();
+    if (error) { toast.error("Error adding user."); return; }
+    setAllowedUsers((prev) => [...prev, data]);
     setNewUserId(""); setAddingUser(false);
     toast.success("User added.");
   };
 
-  const addGroup = () => {
+  const addGroup = async () => {
     if (!newGroupId.trim()) return;
-    setAllowedGroups((prev) => ({ ...prev, [sysId]: [...(prev[sysId] || []), newGroupId.trim()] }));
+    const { data, error } = await supabase.from("allowed_groups").insert({ system_id: sysId, telegram_chat_id: newGroupId.trim() }).select().single();
+    if (error) { toast.error("Error adding group."); return; }
+    setAllowedGroups((prev) => [...prev, data]);
     setNewGroupId(""); setAddingGroup(false);
     toast.success("Group added.");
   };
 
-  const addChannelEntry = () => {
+  const addChannelEntry = async () => {
     if (!newChannel.trim()) return;
     const val = newChannel.trim().toUpperCase().replace(/^@/, "");
-    setChannels((prev) => ({ ...prev, [sysId]: [...(prev[sysId] || []), val] }));
+    const { data, error } = await supabase.from("channels").insert({ system_id: sysId, username: val }).select().single();
+    if (error) { toast.error("Error adding channel."); return; }
+    setChannels((prev) => [...prev, data]);
     setNewChannel(""); setAddingChannel(false);
     toast.success("Channel added.");
   };
 
-  const addScheduledTask = () => {
-    if (!newTaskChatId.trim() || !newTaskMessage.trim() || !newTaskTime.trim()) {
-      toast.error("Fill all fields."); return;
-    }
-    const task: ScheduledTask = { id: Date.now().toString(), chatId: newTaskChatId.trim(), message: newTaskMessage.trim(), time: newTaskTime, repeat: newTaskRepeat, enabled: true };
-    setScheduledTasks((prev) => ({ ...prev, [sysId]: [...(prev[sysId] || []), task] }));
+  const addScheduledTask = async () => {
+    if (!newTaskChatId.trim() || !newTaskMessage.trim() || !newTaskTime.trim()) { toast.error("Fill all fields."); return; }
+    const { data, error } = await supabase.from("scheduled_tasks").insert({
+      system_id: sysId, chat_id: newTaskChatId.trim(), message: newTaskMessage.trim(),
+      scheduled_time: newTaskTime, repeat_interval: newTaskRepeat,
+    }).select().single();
+    if (error) { toast.error("Error creating task."); return; }
+    setScheduledTasks((prev) => [...prev, data]);
     setNewTaskChatId(""); setNewTaskMessage(""); setNewTaskTime(""); setNewTaskRepeat("once");
     setAddingTask(false);
     toast.success("Task scheduled.");
   };
 
-  const removeTask = (taskId: string) => {
-    setScheduledTasks((prev) => ({ ...prev, [sysId]: (prev[sysId] || []).filter((t) => t.id !== taskId) }));
+  const removeTask = async (taskId: string) => {
+    await supabase.from("scheduled_tasks").delete().eq("id", taskId);
+    setScheduledTasks((prev) => prev.filter((t) => t.id !== taskId));
     toast.success("Task removed.");
   };
 
-  const toggleTask = (taskId: string) => {
-    setScheduledTasks((prev) => ({
-      ...prev,
-      [sysId]: (prev[sysId] || []).map((t) => t.id === taskId ? { ...t, enabled: !t.enabled } : t),
-    }));
+  const toggleTask = async (taskId: string) => {
+    const task = scheduledTasks.find((t) => t.id === taskId);
+    if (!task) return;
+    await supabase.from("scheduled_tasks").update({ enabled: !task.enabled }).eq("id", taskId);
+    setScheduledTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, enabled: !t.enabled } : t));
   };
 
-  const addAutoDeleteRule = () => {
+  const addAutoDeleteRule = async () => {
     if (!newRuleChatId.trim()) { toast.error("Chat ID required."); return; }
-    const rule: AutoDeleteRule = { id: Date.now().toString(), chatId: newRuleChatId.trim(), delay: newRuleDelay, enabled: true };
-    setAutoDeleteRules((prev) => ({ ...prev, [sysId]: [...(prev[sysId] || []), rule] }));
+    const { data, error } = await supabase.from("auto_delete_rules").insert({
+      system_id: sysId, chat_id: newRuleChatId.trim(), delay: newRuleDelay,
+    }).select().single();
+    if (error) { toast.error("Error adding rule."); return; }
+    setAutoDeleteRules((prev) => [...prev, data]);
     setNewRuleChatId(""); setNewRuleDelay("5m"); setAddingRule(false);
     toast.success("Rule added.");
   };
 
-  const removeRule = (ruleId: string) => {
-    setAutoDeleteRules((prev) => ({ ...prev, [sysId]: (prev[sysId] || []).filter((r) => r.id !== ruleId) }));
+  const removeRule = async (ruleId: string) => {
+    await supabase.from("auto_delete_rules").delete().eq("id", ruleId);
+    setAutoDeleteRules((prev) => prev.filter((r) => r.id !== ruleId));
     toast.success("Rule removed.");
   };
 
-  const toggleRule = (ruleId: string) => {
-    setAutoDeleteRules((prev) => ({
-      ...prev,
-      [sysId]: (prev[sysId] || []).map((r) => r.id === ruleId ? { ...r, enabled: !r.enabled } : r),
-    }));
+  const toggleRule = async (ruleId: string) => {
+    const rule = autoDeleteRules.find((r) => r.id === ruleId);
+    if (!rule) return;
+    await supabase.from("auto_delete_rules").update({ enabled: !rule.enabled }).eq("id", ruleId);
+    setAutoDeleteRules((prev) => prev.map((r) => r.id === ruleId ? { ...r, enabled: !r.enabled } : r));
   };
 
   const header = (
@@ -271,7 +305,6 @@ const Systems = () => {
             <TabsContent value="access" className="mt-5">
               <GlowCard title="Access Control" subtitle="Manage who can interact with this system">
                 <div className="space-y-4">
-                  {/* Users */}
                   <div className="p-3 rounded-md bg-muted/50 border border-border">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-sm text-foreground">Allowed Users</span>
@@ -286,15 +319,16 @@ const Systems = () => {
                         <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => { setAddingUser(false); setNewUserId(""); }}>Cancel</Button>
                       </div>
                     )}
-                    {(allowedUsers[sysId] || []).length === 0 && !addingUser ? (
+                    {allowedUsers.length === 0 && !addingUser ? (
                       <p className="text-xs text-muted-foreground">No users configured yet.</p>
                     ) : (
                       <div className="space-y-1">
-                        {(allowedUsers[sysId] || []).map((uid, i) => (
-                          <div key={i} className="flex items-center justify-between py-1 px-2 rounded bg-background border border-border">
-                            <span className="text-xs font-mono text-foreground">{uid}</span>
-                            <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive" onClick={() => {
-                              setAllowedUsers((prev) => ({ ...prev, [sysId]: (prev[sysId] || []).filter((_, idx) => idx !== i) }));
+                        {allowedUsers.map((u) => (
+                          <div key={u.id} className="flex items-center justify-between py-1 px-2 rounded bg-background border border-border">
+                            <span className="text-xs font-mono text-foreground">{u.telegram_user_id}</span>
+                            <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive" onClick={async () => {
+                              await supabase.from("allowed_users").delete().eq("id", u.id);
+                              setAllowedUsers((prev) => prev.filter((x) => x.id !== u.id));
                               toast.success("User removed.");
                             }}><X className="w-3 h-3" /></Button>
                           </div>
@@ -302,7 +336,6 @@ const Systems = () => {
                       </div>
                     )}
                   </div>
-                  {/* Groups */}
                   <div className="p-3 rounded-md bg-muted/50 border border-border">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-sm text-foreground">Allowed Groups / Channels</span>
@@ -317,15 +350,16 @@ const Systems = () => {
                         <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => { setAddingGroup(false); setNewGroupId(""); }}>Cancel</Button>
                       </div>
                     )}
-                    {(allowedGroups[sysId] || []).length === 0 && !addingGroup ? (
+                    {allowedGroups.length === 0 && !addingGroup ? (
                       <p className="text-xs text-muted-foreground">No groups configured yet.</p>
                     ) : (
                       <div className="space-y-1">
-                        {(allowedGroups[sysId] || []).map((gid, i) => (
-                          <div key={i} className="flex items-center justify-between py-1 px-2 rounded bg-background border border-border">
-                            <span className="text-xs font-mono text-foreground">{gid}</span>
-                            <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive" onClick={() => {
-                              setAllowedGroups((prev) => ({ ...prev, [sysId]: (prev[sysId] || []).filter((_, idx) => idx !== i) }));
+                        {allowedGroups.map((g) => (
+                          <div key={g.id} className="flex items-center justify-between py-1 px-2 rounded bg-background border border-border">
+                            <span className="text-xs font-mono text-foreground">{g.telegram_chat_id}</span>
+                            <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive" onClick={async () => {
+                              await supabase.from("allowed_groups").delete().eq("id", g.id);
+                              setAllowedGroups((prev) => prev.filter((x) => x.id !== g.id));
                               toast.success("Group removed.");
                             }}><X className="w-3 h-3" /></Button>
                           </div>
@@ -350,15 +384,8 @@ const Systems = () => {
                     <div className="p-3 rounded-md bg-muted/50 border border-border space-y-3">
                       <div className="space-y-1">
                         <Label className="text-xs text-muted-foreground">Channel Username</Label>
-                        <Input
-                          placeholder="e.g. @MyChannel or MYCHANNEL"
-                          value={newChannel}
-                          onChange={(e) => setNewChannel(e.target.value)}
-                          className="text-sm h-8 font-mono uppercase"
-                          autoFocus
-                          onKeyDown={(e) => { if (e.key === "Enter") addChannelEntry(); }}
-                        />
-                        <p className="text-xs text-muted-foreground">Enter the channel username (short name). It will be stored in uppercase.</p>
+                        <Input placeholder="e.g. @MyChannel or MYCHANNEL" value={newChannel} onChange={(e) => setNewChannel(e.target.value)} className="text-sm h-8 font-mono uppercase" autoFocus onKeyDown={(e) => { if (e.key === "Enter") addChannelEntry(); }} />
+                        <p className="text-xs text-muted-foreground">Enter the channel username. Stored in uppercase.</p>
                       </div>
                       <div className="flex gap-2">
                         <Button size="sm" className="text-xs" onClick={addChannelEntry}>Save</Button>
@@ -366,21 +393,22 @@ const Systems = () => {
                       </div>
                     </div>
                   )}
-                  {(channels[sysId] || []).length === 0 && !addingChannel ? (
+                  {channels.length === 0 && !addingChannel ? (
                     <div className="p-6 text-center">
                       <Hash className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
                       <p className="text-sm text-muted-foreground">No channels added yet.</p>
                     </div>
                   ) : (
                     <div className="space-y-1">
-                      {(channels[sysId] || []).map((ch, i) => (
-                        <div key={i} className="flex items-center justify-between py-1.5 px-2 rounded bg-background border border-border">
+                      {channels.map((ch) => (
+                        <div key={ch.id} className="flex items-center justify-between py-1.5 px-2 rounded bg-background border border-border">
                           <div className="flex items-center gap-2">
                             <Hash className="w-3.5 h-3.5 text-muted-foreground" />
-                            <span className="text-xs font-mono font-semibold text-foreground">@{ch}</span>
+                            <span className="text-xs font-mono font-semibold text-foreground">@{ch.username}</span>
                           </div>
-                          <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive" onClick={() => {
-                            setChannels((prev) => ({ ...prev, [sysId]: (prev[sysId] || []).filter((_, idx) => idx !== i) }));
+                          <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive" onClick={async () => {
+                            await supabase.from("channels").delete().eq("id", ch.id);
+                            setChannels((prev) => prev.filter((x) => x.id !== ch.id));
                             toast.success("Channel removed.");
                           }}><X className="w-3 h-3" /></Button>
                         </div>
@@ -434,18 +462,18 @@ const Systems = () => {
                       </div>
                     </div>
                   )}
-                  {(scheduledTasks[sysId] || []).length === 0 && !addingTask ? (
+                  {scheduledTasks.length === 0 && !addingTask ? (
                     <div className="p-6 text-center">
                       <Clock className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
                       <p className="text-sm text-muted-foreground">No scheduled tasks.</p>
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      {(scheduledTasks[sysId] || []).map((task) => (
+                      {scheduledTasks.map((task) => (
                         <div key={task.id} className={`flex items-center justify-between p-3 rounded-md border border-border ${task.enabled ? "bg-background" : "bg-muted/30 opacity-60"}`}>
                           <div className="space-y-0.5">
                             <p className="text-sm text-foreground">{task.message}</p>
-                            <p className="text-xs text-muted-foreground font-mono">Chat: {task.chatId} · {task.time} · {task.repeat}</p>
+                            <p className="text-xs text-muted-foreground font-mono">Chat: {task.chat_id} · {task.scheduled_time} · {task.repeat_interval}</p>
                           </div>
                           <div className="flex items-center gap-2">
                             <Switch checked={task.enabled} onCheckedChange={() => toggleTask(task.id)} />
@@ -498,17 +526,17 @@ const Systems = () => {
                       </div>
                     </div>
                   )}
-                  {(autoDeleteRules[sysId] || []).length === 0 && !addingRule ? (
+                  {autoDeleteRules.length === 0 && !addingRule ? (
                     <div className="p-6 text-center">
                       <Trash2 className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
                       <p className="text-sm text-muted-foreground">No auto-delete rules.</p>
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      {(autoDeleteRules[sysId] || []).map((rule) => (
+                      {autoDeleteRules.map((rule) => (
                         <div key={rule.id} className={`flex items-center justify-between p-3 rounded-md border border-border ${rule.enabled ? "bg-background" : "bg-muted/30 opacity-60"}`}>
                           <div className="space-y-0.5">
-                            <p className="text-sm font-mono text-foreground">Chat: {rule.chatId}</p>
+                            <p className="text-sm font-mono text-foreground">Chat: {rule.chat_id}</p>
                             <p className="text-xs text-muted-foreground">Delete after {rule.delay}</p>
                           </div>
                           <div className="flex items-center gap-2">
@@ -701,7 +729,11 @@ const Systems = () => {
           </Button>
         </div>
 
-        {systems.length === 0 ? (
+        {loading ? (
+          <div className="flex justify-center py-12">
+            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : systems.length === 0 ? (
           <GlowCard className="py-12">
             <div className="text-center">
               <Bot className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
