@@ -142,7 +142,7 @@ const Systems = ({ session }: { session: Session | null }) => {
       if (error) { toast.error("DB error."); return; }
 
       // Set Telegram webhook
-      const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/telegram-webhook/${botToken}?apikey=${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`;
+      const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/telegram-webhook/${botToken}`;
       const whRes = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
