@@ -551,7 +551,11 @@ serve(async (req) => {
     if (hasAccessControl) {
       const userAllowed = await isUserAllowed(system.id, userId);
       const chatAllowed = await isChatAllowed(system.id, chatId);
+      console.log(`Access check: user=${userId}, userAllowed=${userAllowed}, chatAllowed=${chatAllowed}, system=${system.id}`);
       if (!userAllowed && !chatAllowed) {
+        if (text.startsWith("/")) {
+          await sendMessage(botToken, chatId, "❌ You are not authorized to use this bot. Ask an admin to add you.");
+        }
         return new Response(JSON.stringify({ ok: true }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
