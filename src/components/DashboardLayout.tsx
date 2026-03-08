@@ -30,7 +30,29 @@ const DashboardLayout = () => {
               </div>
             )}
           </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setCollapsed(!collapsed)}
+            className={`h-7 w-7 text-muted-foreground hover:text-foreground shrink-0 ${collapsed ? "hidden" : ""}`}
+            title="Collapse sidebar"
+          >
+            <PanelLeftClose className="w-4 h-4" />
+          </Button>
         </div>
+        {collapsed && (
+          <div className="p-2 border-b border-border flex justify-center">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setCollapsed(false)}
+              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+              title="Expand sidebar"
+            >
+              <PanelLeft className="w-4 h-4" />
+            </Button>
+          </div>
+        )}
 
         <nav className="flex-1 p-2 space-y-1">
           {navItems.map(({ to, icon: Icon, label }) => (
@@ -53,22 +75,13 @@ const DashboardLayout = () => {
           ))}
         </nav>
 
-        <div className="p-2 border-t border-border space-y-2">
+        <div className="p-2 border-t border-border">
           {!collapsed && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono px-2">
               <Zap className="w-3 h-3 text-accent animate-pulse-glow" />
               <span>System Online</span>
             </div>
           )}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setCollapsed(!collapsed)}
-            className="w-full h-8 text-muted-foreground hover:text-foreground"
-            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {collapsed ? <PanelLeft className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
-          </Button>
         </div>
       </aside>
 
