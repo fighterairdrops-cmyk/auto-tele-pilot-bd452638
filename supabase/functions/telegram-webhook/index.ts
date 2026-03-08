@@ -142,7 +142,7 @@ async function handleStart(botToken: string, systemLabel: string, chatId: number
   if (admin) {
     text += `\n🔑 <b>Admin Commands:</b>\n`;
     text += `/access @ch1 @ch2 - Grant channel access (reply to user)\n`;
-    text += `/revoke @ch1 - Revoke channel access (reply to user)\n`;
+    text += `/remove @ch1 - Remove channel access (reply to user)\n`;
     text += `/addadmin - Make user admin (reply to user)\n`;
     text += `/removeadmin - Remove admin (reply to user)\n`;
     text += `/allposts - View all scheduled posts\n`;
@@ -593,6 +593,7 @@ serve(async (req) => {
         break;
 
       case "/revoke":
+      case "/remove":
         await handleRevoke(botToken, system.id, chatId, userId, args, replyToMessage);
         break;
 
