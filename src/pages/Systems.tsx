@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
+import type { Session } from "@supabase/supabase-js";
 import {
   Bot, User, Plus, Shield, Clock, Trash2, MessageSquare, BarChart3,
   ArrowLeft, Upload, FileText, RefreshCw, Unlink, X,
-  Loader2, Settings, ChevronRight, Sun, Moon, Hash,
+  Loader2, Settings, ChevronRight, Sun, Moon, Hash, LogOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,7 +37,9 @@ interface AutoDeleteRule { id: string; chat_id: string; delay: string; enabled: 
 
 type View = "list" | "create-choose" | "create-bot" | "create-account" | "manage";
 
-const Systems = () => {
+const Systems = ({ session }: { session: Session | null }) => {
+  const navigate = useNavigate();
+  const userId = session?.user?.id;
   const [dark, setDark] = useState(() => document.documentElement.classList.contains("dark"));
   const [view, setView] = useState<View>("list");
   const [systems, setSystems] = useState<ConnectedSystem[]>([]);
@@ -133,9 +137,24 @@ const Systems = () => {
       if (!data.ok) { toast.error("Invalid bot token."); return; }
       const bot = data.result;
       const { data: inserted, error } = await supabase.from("systems").insert({
-        type: "bot", label: bot.first_name, username: `@${bot.username}`, status: "online", bot_token: botToken,
+        type: "bot", label: bot.first_name, username: `@${bot.username}`, status: "online", bot_token: botToken, user_id: userId,
       }).select().single();
       if (error) { toast.error("DB error."); return; }
+
+      // Set Telegram webhook
+      const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/telegram-webhook/${botToken}`;
+      const whRes = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: webhookUrl }),
+      });
+      const whData = await whRes.json();
+      if (whData.ok) {
+        toast.success(`Webhook set for @${bot.username}`);
+      } else {
+        toast.error("Bot connected but webhook setup failed.");
+      }
+
       setSystems((prev) => [...prev, { id: inserted.id, type: "bot", label: bot.first_name, username: `@${bot.username}`, status: "online", lastChecked: now() }]);
       toast.success(`Connected: @${bot.username}`);
       setBotToken("");
@@ -148,7 +167,7 @@ const Systems = () => {
     if (!stringSession.trim() && !sessionFile) { toast.error("Provide session string or file."); return; }
     const label = sessionFile ? sessionFile.name : `Account_${apiId}`;
     const { data: inserted, error } = await supabase.from("systems").insert({
-      type: "account", label, status: "online", api_id: apiId, api_hash: apiHash, string_session: stringSession || null,
+      type: "account", label, status: "online", api_id: apiId, api_hash: apiHash, string_session: stringSession || null, user_id: userId,
     }).select().single();
     if (error) { toast.error("DB error."); return; }
     setSystems((prev) => [...prev, { id: inserted.id, type: "account", label, status: "online", lastChecked: now() }]);
@@ -255,15 +274,26 @@ const Systems = () => {
     setAutoDeleteRules((prev) => prev.map((r) => r.id === ruleId ? { ...r, enabled: !r.enabled } : r));
   };
 
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    navigate("/auth");
+  };
+
   const header = (
     <div className="flex items-center justify-between border-b border-border px-5 py-3 bg-card">
       <div className="flex items-center gap-2">
         <Bot className="w-5 h-5 text-primary" />
         <span className="font-semibold text-foreground text-sm">TG Controller</span>
       </div>
-      <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={toggleTheme}>
-        {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-      </Button>
+      <div className="flex items-center gap-1">
+        <span className="text-xs text-muted-foreground mr-2 hidden sm:inline">{session?.user?.email}</span>
+        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={toggleTheme}>
+          {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+        </Button>
+        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={handleLogout}>
+          <LogOut className="w-4 h-4" />
+        </Button>
+      </div>
     </div>
   );
 
