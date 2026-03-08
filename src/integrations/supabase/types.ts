@@ -136,6 +136,33 @@ export type Database = {
           },
         ]
       }
+      profiles: {
+        Row: {
+          created_at: string
+          display_name: string | null
+          email: string | null
+          id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          display_name?: string | null
+          email?: string | null
+          id?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          display_name?: string | null
+          email?: string | null
+          id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       scheduled_tasks: {
         Row: {
           chat_id: string
@@ -189,6 +216,7 @@ export type Database = {
           status: string
           string_session: string | null
           type: string
+          user_id: string | null
           username: string | null
         }
         Insert: {
@@ -202,6 +230,7 @@ export type Database = {
           status?: string
           string_session?: string | null
           type: string
+          user_id?: string | null
           username?: string | null
         }
         Update: {
@@ -215,6 +244,7 @@ export type Database = {
           status?: string
           string_session?: string | null
           type?: string
+          user_id?: string | null
           username?: string | null
         }
         Relationships: []
