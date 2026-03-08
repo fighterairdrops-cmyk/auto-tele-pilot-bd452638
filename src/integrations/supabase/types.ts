@@ -47,18 +47,21 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          is_admin: boolean
           system_id: string
           telegram_user_id: string
         }
         Insert: {
           created_at?: string
           id?: string
+          is_admin?: boolean
           system_id: string
           telegram_user_id: string
         }
         Update: {
           created_at?: string
           id?: string
+          is_admin?: boolean
           system_id?: string
           telegram_user_id?: string
         }
@@ -163,6 +166,56 @@ export type Database = {
         }
         Relationships: []
       }
+      scheduled_posts: {
+        Row: {
+          active: boolean
+          chat_id: string
+          created_at: string
+          id: string
+          interval_seconds: number
+          message_text: string
+          next_run_at: string
+          system_id: string
+          telegram_user_id: string
+          times_sent: number
+          total_times: number
+        }
+        Insert: {
+          active?: boolean
+          chat_id: string
+          created_at?: string
+          id?: string
+          interval_seconds?: number
+          message_text: string
+          next_run_at?: string
+          system_id: string
+          telegram_user_id: string
+          times_sent?: number
+          total_times?: number
+        }
+        Update: {
+          active?: boolean
+          chat_id?: string
+          created_at?: string
+          id?: string
+          interval_seconds?: number
+          message_text?: string
+          next_run_at?: string
+          system_id?: string
+          telegram_user_id?: string
+          times_sent?: number
+          total_times?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scheduled_posts_system_id_fkey"
+            columns: ["system_id"]
+            isOneToOne: false
+            referencedRelation: "systems"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       scheduled_tasks: {
         Row: {
           chat_id: string
@@ -248,6 +301,41 @@ export type Database = {
           username?: string | null
         }
         Relationships: []
+      }
+      user_channel_access: {
+        Row: {
+          channel_username: string
+          created_at: string
+          granted_by: string | null
+          id: string
+          system_id: string
+          telegram_user_id: string
+        }
+        Insert: {
+          channel_username: string
+          created_at?: string
+          granted_by?: string | null
+          id?: string
+          system_id: string
+          telegram_user_id: string
+        }
+        Update: {
+          channel_username?: string
+          created_at?: string
+          granted_by?: string | null
+          id?: string
+          system_id?: string
+          telegram_user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_channel_access_system_id_fkey"
+            columns: ["system_id"]
+            isOneToOne: false
+            referencedRelation: "systems"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
