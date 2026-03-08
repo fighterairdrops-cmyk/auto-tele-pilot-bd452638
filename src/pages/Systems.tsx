@@ -140,6 +140,21 @@ const Systems = ({ session }: { session: Session | null }) => {
         type: "bot", label: bot.first_name, username: `@${bot.username}`, status: "online", bot_token: botToken, user_id: userId,
       }).select().single();
       if (error) { toast.error("DB error."); return; }
+
+      // Set Telegram webhook
+      const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/telegram-webhook/${botToken}`;
+      const whRes = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: webhookUrl }),
+      });
+      const whData = await whRes.json();
+      if (whData.ok) {
+        toast.success(`Webhook set for @${bot.username}`);
+      } else {
+        toast.error("Bot connected but webhook setup failed.");
+      }
+
       setSystems((prev) => [...prev, { id: inserted.id, type: "bot", label: bot.first_name, username: `@${bot.username}`, status: "online", lastChecked: now() }]);
       toast.success(`Connected: @${bot.username}`);
       setBotToken("");
