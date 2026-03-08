@@ -347,7 +347,7 @@ async function handlePost(botToken: string, systemId: string, chatId: number, us
     interval_seconds: intervalSeconds,
     total_times: totalTimes,
     times_sent: 0,
-    next_run_at: new Date(Date.now() + intervalSeconds * 1000).toISOString(),
+    next_run_at: new Date(Date.now() + 3 * 60 * 1000).toISOString(),
     active: true,
   }).select().single();
 
