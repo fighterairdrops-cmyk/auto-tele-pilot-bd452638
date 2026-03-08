@@ -249,7 +249,7 @@ serve(async (req) => {
 
       case "/help":
         await sendMessage(botToken, chatId,
-          `📋 <b>Commands</b>\n\n/start - Welcome message\n/id - Get chat/user ID\n/post <message> - Post to all channels\n/channels - List channels\n/help - This message`
+          `📋 <b>Commands</b>\n\n/start - Welcome message\n/id - Get chat/user ID\n/post &lt;message&gt; - Post to all channels\n/channels - List channels\n/help - This message`
         );
         break;
 
