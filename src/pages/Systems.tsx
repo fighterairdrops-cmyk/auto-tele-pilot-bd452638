@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
+import type { Session } from "@supabase/supabase-js";
 import {
   Bot, User, Plus, Shield, Clock, Trash2, MessageSquare, BarChart3,
   ArrowLeft, Upload, FileText, RefreshCw, Unlink, X,
-  Loader2, Settings, ChevronRight, Sun, Moon, Hash,
+  Loader2, Settings, ChevronRight, Sun, Moon, Hash, LogOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
