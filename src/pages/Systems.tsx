@@ -259,15 +259,26 @@ const Systems = ({ session }: { session: Session | null }) => {
     setAutoDeleteRules((prev) => prev.map((r) => r.id === ruleId ? { ...r, enabled: !r.enabled } : r));
   };
 
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    navigate("/auth");
+  };
+
   const header = (
     <div className="flex items-center justify-between border-b border-border px-5 py-3 bg-card">
       <div className="flex items-center gap-2">
         <Bot className="w-5 h-5 text-primary" />
         <span className="font-semibold text-foreground text-sm">TG Controller</span>
       </div>
-      <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={toggleTheme}>
-        {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-      </Button>
+      <div className="flex items-center gap-1">
+        <span className="text-xs text-muted-foreground mr-2 hidden sm:inline">{session?.user?.email}</span>
+        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={toggleTheme}>
+          {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+        </Button>
+        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={handleLogout}>
+          <LogOut className="w-4 h-4" />
+        </Button>
+      </div>
     </div>
   );
 
