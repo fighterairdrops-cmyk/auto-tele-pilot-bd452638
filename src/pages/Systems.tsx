@@ -126,20 +126,113 @@ const Systems = () => {
 
           <TabsContent value="access" className="mt-5">
             <GlowCard title="Access Control" subtitle="Manage who can interact with this system">
-              <div className="space-y-3">
+              <div className="space-y-4">
+                {/* Allowed Users */}
                 <div className="p-3 rounded-md bg-muted/50 border border-border">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm text-foreground">Allowed Users</span>
-                    <Button size="sm" variant="outline" className="text-xs h-7"><Plus className="w-3 h-3 mr-1" /> Add</Button>
+                    <Button size="sm" variant="outline" className="text-xs h-7" onClick={() => setAddingUser(true)}>
+                      <Plus className="w-3 h-3 mr-1" /> Add
+                    </Button>
                   </div>
-                  <p className="text-xs text-muted-foreground">No users configured yet.</p>
+                  {addingUser && (
+                    <div className="flex items-center gap-2 mb-2">
+                      <Input
+                        placeholder="Telegram User ID (e.g. 123456789)"
+                        value={newUserId}
+                        onChange={(e) => setNewUserId(e.target.value)}
+                        className="text-sm h-8 font-mono"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && newUserId.trim()) {
+                            setAllowedUsers((prev) => ({ ...prev, [managingSystem.id]: [...(prev[managingSystem.id] || []), newUserId.trim()] }));
+                            setNewUserId("");
+                            setAddingUser(false);
+                            toast.success("User added.");
+                          }
+                        }}
+                      />
+                      <Button size="sm" className="h-8 text-xs" onClick={() => {
+                        if (!newUserId.trim()) return;
+                        setAllowedUsers((prev) => ({ ...prev, [managingSystem.id]: [...(prev[managingSystem.id] || []), newUserId.trim()] }));
+                        setNewUserId("");
+                        setAddingUser(false);
+                        toast.success("User added.");
+                      }}>Save</Button>
+                      <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => { setAddingUser(false); setNewUserId(""); }}>Cancel</Button>
+                    </div>
+                  )}
+                  {(allowedUsers[managingSystem.id] || []).length === 0 && !addingUser ? (
+                    <p className="text-xs text-muted-foreground">No users configured yet.</p>
+                  ) : (
+                    <div className="space-y-1">
+                      {(allowedUsers[managingSystem.id] || []).map((uid, i) => (
+                        <div key={i} className="flex items-center justify-between py-1 px-2 rounded bg-background border border-border">
+                          <span className="text-xs font-mono text-foreground">{uid}</span>
+                          <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive" onClick={() => {
+                            setAllowedUsers((prev) => ({ ...prev, [managingSystem.id]: (prev[managingSystem.id] || []).filter((_, idx) => idx !== i) }));
+                            toast.success("User removed.");
+                          }}>
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
+
+                {/* Allowed Groups */}
                 <div className="p-3 rounded-md bg-muted/50 border border-border">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm text-foreground">Allowed Groups</span>
-                    <Button size="sm" variant="outline" className="text-xs h-7"><Plus className="w-3 h-3 mr-1" /> Add</Button>
+                    <span className="text-sm text-foreground">Allowed Groups / Channels</span>
+                    <Button size="sm" variant="outline" className="text-xs h-7" onClick={() => setAddingGroup(true)}>
+                      <Plus className="w-3 h-3 mr-1" /> Add
+                    </Button>
                   </div>
-                  <p className="text-xs text-muted-foreground">No groups configured yet.</p>
+                  {addingGroup && (
+                    <div className="flex items-center gap-2 mb-2">
+                      <Input
+                        placeholder="Chat ID (e.g. -1001234567890)"
+                        value={newGroupId}
+                        onChange={(e) => setNewGroupId(e.target.value)}
+                        className="text-sm h-8 font-mono"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && newGroupId.trim()) {
+                            setAllowedGroups((prev) => ({ ...prev, [managingSystem.id]: [...(prev[managingSystem.id] || []), newGroupId.trim()] }));
+                            setNewGroupId("");
+                            setAddingGroup(false);
+                            toast.success("Group added.");
+                          }
+                        }}
+                      />
+                      <Button size="sm" className="h-8 text-xs" onClick={() => {
+                        if (!newGroupId.trim()) return;
+                        setAllowedGroups((prev) => ({ ...prev, [managingSystem.id]: [...(prev[managingSystem.id] || []), newGroupId.trim()] }));
+                        setNewGroupId("");
+                        setAddingGroup(false);
+                        toast.success("Group added.");
+                      }}>Save</Button>
+                      <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => { setAddingGroup(false); setNewGroupId(""); }}>Cancel</Button>
+                    </div>
+                  )}
+                  {(allowedGroups[managingSystem.id] || []).length === 0 && !addingGroup ? (
+                    <p className="text-xs text-muted-foreground">No groups configured yet.</p>
+                  ) : (
+                    <div className="space-y-1">
+                      {(allowedGroups[managingSystem.id] || []).map((gid, i) => (
+                        <div key={i} className="flex items-center justify-between py-1 px-2 rounded bg-background border border-border">
+                          <span className="text-xs font-mono text-foreground">{gid}</span>
+                          <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive" onClick={() => {
+                            setAllowedGroups((prev) => ({ ...prev, [managingSystem.id]: (prev[managingSystem.id] || []).filter((_, idx) => idx !== i) }));
+                            toast.success("Group removed.");
+                          }}>
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </GlowCard>
