@@ -221,7 +221,7 @@ serve(async (req) => {
     switch (command) {
       case "/start":
         await sendMessage(botToken, chatId,
-          `👋 Hello! I'm <b>${system.label}</b>.\n\nAvailable commands:\n/id - Get chat/user ID\n/post <message> - Post to channels\n/channels - List configured channels\n/help - Show this message`
+          `👋 Hello! I'm <b>${system.label}</b>.\n\nAvailable commands:\n/id - Get chat/user ID\n/post &lt;message&gt; - Post to channels\n/channels - List configured channels\n/help - Show this message`
         );
         break;
 
