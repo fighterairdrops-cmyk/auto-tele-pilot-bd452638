@@ -30,7 +30,29 @@ const DashboardLayout = () => {
               </div>
             )}
           </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setCollapsed(!collapsed)}
+            className={`h-7 w-7 text-muted-foreground hover:text-foreground shrink-0 ${collapsed ? "hidden" : ""}`}
+            title="Collapse sidebar"
+          >
+            <PanelLeftClose className="w-4 h-4" />
+          </Button>
         </div>
+        {collapsed && (
+          <div className="p-2 border-b border-border flex justify-center">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setCollapsed(false)}
+              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+              title="Expand sidebar"
+            >
+              <PanelLeft className="w-4 h-4" />
+            </Button>
+          </div>
+        )}
 
         <nav className="flex-1 p-2 space-y-1">
           {navItems.map(({ to, icon: Icon, label }) => (
