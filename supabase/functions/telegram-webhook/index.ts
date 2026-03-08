@@ -140,13 +140,16 @@ serve(async (req) => {
     console.log("Update received:", JSON.stringify(update).substring(0, 500));
     const message = update.message;
     if (!message) {
+      console.log("No message in update");
       return new Response(JSON.stringify({ ok: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     const system = await getSystemByToken(botToken);
+    console.log("System found:", system ? system.label : "NONE");
     if (!system) {
+      console.log("No system for token");
       return new Response(JSON.stringify({ ok: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
