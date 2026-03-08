@@ -14,7 +14,211 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      allowed_groups: {
+        Row: {
+          created_at: string
+          id: string
+          system_id: string
+          telegram_chat_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          system_id: string
+          telegram_chat_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          system_id?: string
+          telegram_chat_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "allowed_groups_system_id_fkey"
+            columns: ["system_id"]
+            isOneToOne: false
+            referencedRelation: "systems"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      allowed_users: {
+        Row: {
+          created_at: string
+          id: string
+          system_id: string
+          telegram_user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          system_id: string
+          telegram_user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          system_id?: string
+          telegram_user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "allowed_users_system_id_fkey"
+            columns: ["system_id"]
+            isOneToOne: false
+            referencedRelation: "systems"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      auto_delete_rules: {
+        Row: {
+          chat_id: string
+          created_at: string
+          delay: string
+          enabled: boolean
+          id: string
+          system_id: string
+        }
+        Insert: {
+          chat_id: string
+          created_at?: string
+          delay?: string
+          enabled?: boolean
+          id?: string
+          system_id: string
+        }
+        Update: {
+          chat_id?: string
+          created_at?: string
+          delay?: string
+          enabled?: boolean
+          id?: string
+          system_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "auto_delete_rules_system_id_fkey"
+            columns: ["system_id"]
+            isOneToOne: false
+            referencedRelation: "systems"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      channels: {
+        Row: {
+          created_at: string
+          id: string
+          system_id: string
+          username: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          system_id: string
+          username: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          system_id?: string
+          username?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "channels_system_id_fkey"
+            columns: ["system_id"]
+            isOneToOne: false
+            referencedRelation: "systems"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      scheduled_tasks: {
+        Row: {
+          chat_id: string
+          created_at: string
+          enabled: boolean
+          id: string
+          message: string
+          repeat_interval: string
+          scheduled_time: string
+          system_id: string
+        }
+        Insert: {
+          chat_id: string
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          message: string
+          repeat_interval?: string
+          scheduled_time: string
+          system_id: string
+        }
+        Update: {
+          chat_id?: string
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          message?: string
+          repeat_interval?: string
+          scheduled_time?: string
+          system_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scheduled_tasks_system_id_fkey"
+            columns: ["system_id"]
+            isOneToOne: false
+            referencedRelation: "systems"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      systems: {
+        Row: {
+          api_hash: string | null
+          api_id: string | null
+          bot_token: string | null
+          created_at: string
+          id: string
+          label: string
+          last_checked: string | null
+          status: string
+          string_session: string | null
+          type: string
+          username: string | null
+        }
+        Insert: {
+          api_hash?: string | null
+          api_id?: string | null
+          bot_token?: string | null
+          created_at?: string
+          id?: string
+          label: string
+          last_checked?: string | null
+          status?: string
+          string_session?: string | null
+          type: string
+          username?: string | null
+        }
+        Update: {
+          api_hash?: string | null
+          api_id?: string | null
+          bot_token?: string | null
+          created_at?: string
+          id?: string
+          label?: string
+          last_checked?: string | null
+          status?: string
+          string_session?: string | null
+          type?: string
+          username?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
