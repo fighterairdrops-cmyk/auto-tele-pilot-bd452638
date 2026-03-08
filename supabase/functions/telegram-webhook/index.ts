@@ -89,7 +89,7 @@ async function handleAutoDelete(botToken: string, systemId: string, chatId: numb
 
 async function handlePost(botToken: string, systemId: string, args: string[], chatId: number) {
   if (args.length === 0) {
-    await sendMessage(botToken, chatId, "Usage: /post <message>\nPosts to all configured channels.");
+    await sendMessage(botToken, chatId, "Usage: /post &lt;message&gt;\nPosts to all configured channels.");
     return;
   }
   const message = args.join(" ");
