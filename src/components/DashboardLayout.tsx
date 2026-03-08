@@ -1,22 +1,13 @@
-import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
-import { Bot, Shield, Clock, Trash2, MessageSquare, Settings, Zap, PanelLeftClose, PanelLeft } from "lucide-react";
+import { Bot, Zap, PanelLeftClose, PanelLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
-
-const navItems = [
-  { to: "/", icon: Settings, label: "Engine Config" },
-  { to: "/access", icon: Shield, label: "Access Control" },
-  { to: "/scheduler", icon: Clock, label: "Scheduler" },
-  { to: "/auto-delete", icon: Trash2, label: "Auto-Delete" },
-  { to: "/live-feed", icon: MessageSquare, label: "Live Feed" },
-];
+import { useState } from "react";
 
 const DashboardLayout = () => {
   const [collapsed, setCollapsed] = useState(false);
 
   return (
     <div className="flex min-h-screen bg-background grid-bg">
-      {/* Sidebar */}
       <aside className={`border-r border-border bg-sidebar flex flex-col shrink-0 transition-all duration-300 ${collapsed ? "w-16" : "w-64"}`}>
         <div className="p-4 border-b border-border flex items-center justify-between">
           <div className={`flex items-center gap-3 ${collapsed ? "justify-center w-full" : ""}`}>
@@ -35,44 +26,34 @@ const DashboardLayout = () => {
             size="icon"
             onClick={() => setCollapsed(!collapsed)}
             className={`h-7 w-7 text-muted-foreground hover:text-foreground shrink-0 ${collapsed ? "hidden" : ""}`}
-            title="Collapse sidebar"
           >
             <PanelLeftClose className="w-4 h-4" />
           </Button>
         </div>
         {collapsed && (
           <div className="p-2 border-b border-border flex justify-center">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setCollapsed(false)}
-              className="h-7 w-7 text-muted-foreground hover:text-foreground"
-              title="Expand sidebar"
-            >
+            <Button variant="ghost" size="icon" onClick={() => setCollapsed(false)} className="h-7 w-7 text-muted-foreground hover:text-foreground">
               <PanelLeft className="w-4 h-4" />
             </Button>
           </div>
         )}
 
         <nav className="flex-1 p-2 space-y-1">
-          {navItems.map(({ to, icon: Icon, label }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={to === "/"}
-              title={label}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-all duration-200 ${collapsed ? "justify-center px-0" : ""} ${
-                  isActive
-                    ? "bg-primary/10 text-primary border border-primary/20 glow-primary"
-                    : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                }`
-              }
-            >
-              <Icon className="w-4 h-4 shrink-0" />
-              {!collapsed && label}
-            </NavLink>
-          ))}
+          <NavLink
+            to="/"
+            end
+            title="Systems"
+            className={({ isActive }) =>
+              `flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-all duration-200 ${collapsed ? "justify-center px-0" : ""} ${
+                isActive
+                  ? "bg-primary/10 text-primary border border-primary/20 glow-primary"
+                  : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              }`
+            }
+          >
+            <Bot className="w-4 h-4 shrink-0" />
+            {!collapsed && "Systems"}
+          </NavLink>
         </nav>
 
         <div className="p-2 border-t border-border">
@@ -85,7 +66,6 @@ const DashboardLayout = () => {
         </div>
       </aside>
 
-      {/* Main Content */}
       <main className="flex-1 overflow-auto">
         <div className="scanline pointer-events-none fixed inset-0 z-50" />
         <div className="p-8">
