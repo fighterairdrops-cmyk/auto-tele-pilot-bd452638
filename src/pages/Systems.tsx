@@ -137,7 +137,7 @@ const Systems = ({ session }: { session: Session | null }) => {
       if (!data.ok) { toast.error("Invalid bot token."); return; }
       const bot = data.result;
       const { data: inserted, error } = await supabase.from("systems").insert({
-        type: "bot", label: bot.first_name, username: `@${bot.username}`, status: "online", bot_token: botToken,
+        type: "bot", label: bot.first_name, username: `@${bot.username}`, status: "online", bot_token: botToken, user_id: userId,
       }).select().single();
       if (error) { toast.error("DB error."); return; }
       setSystems((prev) => [...prev, { id: inserted.id, type: "bot", label: bot.first_name, username: `@${bot.username}`, status: "online", lastChecked: now() }]);
