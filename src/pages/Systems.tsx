@@ -152,7 +152,7 @@ const Systems = ({ session }: { session: Session | null }) => {
     if (!stringSession.trim() && !sessionFile) { toast.error("Provide session string or file."); return; }
     const label = sessionFile ? sessionFile.name : `Account_${apiId}`;
     const { data: inserted, error } = await supabase.from("systems").insert({
-      type: "account", label, status: "online", api_id: apiId, api_hash: apiHash, string_session: stringSession || null,
+      type: "account", label, status: "online", api_id: apiId, api_hash: apiHash, string_session: stringSession || null, user_id: userId,
     }).select().single();
     if (error) { toast.error("DB error."); return; }
     setSystems((prev) => [...prev, { id: inserted.id, type: "account", label, status: "online", lastChecked: now() }]);
