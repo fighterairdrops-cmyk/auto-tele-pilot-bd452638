@@ -1,52 +1,53 @@
+import { useState, useEffect } from "react";
 import { NavLink, Outlet } from "react-router-dom";
-import { Bot, Zap, PanelLeftClose, PanelLeft } from "lucide-react";
+import { Bot, Zap, PanelLeftClose, PanelLeft, Sun, Moon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useState } from "react";
 
 const DashboardLayout = () => {
   const [collapsed, setCollapsed] = useState(false);
+  const [dark, setDark] = useState(() => document.documentElement.classList.contains("dark"));
+
+  const toggleTheme = () => {
+    const next = !dark;
+    setDark(next);
+    document.documentElement.classList.toggle("dark", next);
+    document.documentElement.classList.toggle("light", !next);
+  };
 
   return (
-    <div className="flex min-h-screen bg-background grid-bg">
-      <aside className={`border-r border-border bg-sidebar flex flex-col shrink-0 transition-all duration-300 ${collapsed ? "w-16" : "w-64"}`}>
-        <div className="p-4 border-b border-border flex items-center justify-between">
-          <div className={`flex items-center gap-3 ${collapsed ? "justify-center w-full" : ""}`}>
-            <div className="p-2 rounded-lg bg-primary/10 border border-primary/30 glow-primary shrink-0">
-              <Bot className="w-5 h-5 text-primary" />
-            </div>
+    <div className="flex min-h-screen bg-background">
+      <aside className={`border-r border-border bg-sidebar flex flex-col shrink-0 transition-all duration-200 ${collapsed ? "w-14" : "w-60"}`}>
+        <div className="p-3 border-b border-border flex items-center justify-between">
+          <div className={`flex items-center gap-2.5 ${collapsed ? "justify-center w-full" : ""}`}>
+            <Bot className="w-5 h-5 text-primary shrink-0" />
             {!collapsed && (
-              <div>
-                <h1 className="text-sm font-bold text-foreground font-heading tracking-tight">TG Controller</h1>
-                <p className="text-xs text-muted-foreground font-mono">v1.0.0</p>
-              </div>
+              <span className="text-sm font-semibold text-foreground truncate">TG Controller</span>
             )}
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setCollapsed(!collapsed)}
-            className={`h-7 w-7 text-muted-foreground hover:text-foreground shrink-0 ${collapsed ? "hidden" : ""}`}
-          >
-            <PanelLeftClose className="w-4 h-4" />
-          </Button>
+          {!collapsed && (
+            <Button variant="ghost" size="icon" onClick={() => setCollapsed(true)} className="h-7 w-7 text-muted-foreground hover:text-foreground shrink-0">
+              <PanelLeftClose className="w-4 h-4" />
+            </Button>
+          )}
         </div>
+
         {collapsed && (
-          <div className="p-2 border-b border-border flex justify-center">
+          <div className="p-1.5 border-b border-border flex justify-center">
             <Button variant="ghost" size="icon" onClick={() => setCollapsed(false)} className="h-7 w-7 text-muted-foreground hover:text-foreground">
               <PanelLeft className="w-4 h-4" />
             </Button>
           </div>
         )}
 
-        <nav className="flex-1 p-2 space-y-1">
+        <nav className="flex-1 p-1.5">
           <NavLink
             to="/"
             end
             title="Systems"
             className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-all duration-200 ${collapsed ? "justify-center px-0" : ""} ${
+              `flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm transition-colors ${collapsed ? "justify-center" : ""} ${
                 isActive
-                  ? "bg-primary/10 text-primary border border-primary/20 glow-primary"
+                  ? "bg-primary/10 text-primary font-medium"
                   : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
               }`
             }
@@ -56,19 +57,16 @@ const DashboardLayout = () => {
           </NavLink>
         </nav>
 
-        <div className="p-2 border-t border-border">
-          {!collapsed && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono px-2">
-              <Zap className="w-3 h-3 text-accent animate-pulse-glow" />
-              <span>System Online</span>
-            </div>
-          )}
+        <div className="p-1.5 border-t border-border flex flex-col gap-1">
+          <Button variant="ghost" size={collapsed ? "icon" : "sm"} onClick={toggleTheme} className={`text-muted-foreground hover:text-foreground ${collapsed ? "mx-auto" : "justify-start gap-2 w-full"}`}>
+            {dark ? <Sun className="w-4 h-4 shrink-0" /> : <Moon className="w-4 h-4 shrink-0" />}
+            {!collapsed && (dark ? "Light mode" : "Dark mode")}
+          </Button>
         </div>
       </aside>
 
       <main className="flex-1 overflow-auto">
-        <div className="scanline pointer-events-none fixed inset-0 z-50" />
-        <div className="p-8">
+        <div className="p-6 max-w-5xl">
           <Outlet />
         </div>
       </main>

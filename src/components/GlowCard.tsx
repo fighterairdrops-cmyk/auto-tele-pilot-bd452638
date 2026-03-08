@@ -10,20 +10,12 @@ type GlowCardProps = {
   headerRight?: ReactNode;
 };
 
-const glowStyles = {
-  primary: "border-glow-primary",
-  accent: "border-accent/30 glow-accent",
-  warning: "border-warning/30 glow-warning",
-  destructive: "border-destructive/30 glow-destructive",
-  none: "",
-};
-
-const GlowCard = ({ children, className, glow = "none", title, subtitle, headerRight }: GlowCardProps) => (
-  <div className={cn("rounded-lg border bg-card p-6", glowStyles[glow], className)}>
+const GlowCard = ({ children, className, title, subtitle, headerRight }: GlowCardProps) => (
+  <div className={cn("rounded-lg border border-border bg-card p-5", className)}>
     {(title || headerRight) && (
       <div className="flex items-center justify-between mb-4">
         <div>
-          {title && <h3 className="text-lg font-semibold font-heading text-card-foreground">{title}</h3>}
+          {title && <h3 className="text-base font-semibold text-card-foreground">{title}</h3>}
           {subtitle && <p className="text-sm text-muted-foreground mt-0.5">{subtitle}</p>}
         </div>
         {headerRight}
