@@ -593,6 +593,7 @@ serve(async (req) => {
         break;
 
       case "/revoke":
+      case "/remove":
         await handleRevoke(botToken, system.id, chatId, userId, args, replyToMessage);
         break;
 
