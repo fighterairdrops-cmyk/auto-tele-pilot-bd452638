@@ -37,7 +37,9 @@ interface AutoDeleteRule { id: string; chat_id: string; delay: string; enabled: 
 
 type View = "list" | "create-choose" | "create-bot" | "create-account" | "manage";
 
-const Systems = () => {
+const Systems = ({ session }: { session: Session | null }) => {
+  const navigate = useNavigate();
+  const userId = session?.user?.id;
   const [dark, setDark] = useState(() => document.documentElement.classList.contains("dark"));
   const [view, setView] = useState<View>("list");
   const [systems, setSystems] = useState<ConnectedSystem[]>([]);
