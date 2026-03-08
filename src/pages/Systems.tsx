@@ -42,6 +42,14 @@ const Systems = () => {
   const [sessionFile, setSessionFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Access control state per system
+  const [allowedUsers, setAllowedUsers] = useState<Record<string, string[]>>({});
+  const [allowedGroups, setAllowedGroups] = useState<Record<string, string[]>>({});
+  const [addingUser, setAddingUser] = useState(false);
+  const [addingGroup, setAddingGroup] = useState(false);
+  const [newUserId, setNewUserId] = useState("");
+  const [newGroupId, setNewGroupId] = useState("");
+
   const now = () => new Date().toLocaleTimeString("en-US", { hour12: false });
 
   const connectBot = async () => {
