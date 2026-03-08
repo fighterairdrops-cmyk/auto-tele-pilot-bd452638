@@ -1,8 +1,8 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
   Bot, User, Plus, Shield, Clock, Trash2, MessageSquare, BarChart3,
   ArrowLeft, Upload, FileText, RefreshCw, Unlink, X,
-  Loader2, Settings, ChevronRight, Sun, Moon,
+  Loader2, Settings, ChevronRight, Sun, Moon, Hash,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,13 +44,21 @@ interface AutoDeleteRule {
 
 type View = "list" | "create-choose" | "create-bot" | "create-account" | "manage";
 
+// localStorage helpers
+function loadJSON<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch { return fallback; }
+}
+function saveJSON(key: string, value: unknown) {
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
 const Systems = () => {
   const [dark, setDark] = useState(() => document.documentElement.classList.contains("dark"));
   const [view, setView] = useState<View>("list");
-  const [systems, setSystems] = useState<ConnectedSystem[]>([
-    { id: "1", type: "bot", label: "Main Bot", username: "@my_bot", status: "online", lastChecked: "16:45:00" },
-    { id: "2", type: "account", label: "UserBot", username: "@user_acc", status: "offline", lastChecked: "15:30:00" },
-  ]);
+  const [systems, setSystems] = useState<ConnectedSystem[]>(() => loadJSON("tg_systems", []));
   const [managingSystem, setManagingSystem] = useState<ConnectedSystem | null>(null);
 
   const [botToken, setBotToken] = useState("");
@@ -62,15 +70,20 @@ const Systems = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Access control
-  const [allowedUsers, setAllowedUsers] = useState<Record<string, string[]>>({});
-  const [allowedGroups, setAllowedGroups] = useState<Record<string, string[]>>({});
+  const [allowedUsers, setAllowedUsers] = useState<Record<string, string[]>>(() => loadJSON("tg_allowedUsers", {}));
+  const [allowedGroups, setAllowedGroups] = useState<Record<string, string[]>>(() => loadJSON("tg_allowedGroups", {}));
   const [addingUser, setAddingUser] = useState(false);
   const [addingGroup, setAddingGroup] = useState(false);
   const [newUserId, setNewUserId] = useState("");
   const [newGroupId, setNewGroupId] = useState("");
 
+  // Channels
+  const [channels, setChannels] = useState<Record<string, string[]>>(() => loadJSON("tg_channels", {}));
+  const [addingChannel, setAddingChannel] = useState(false);
+  const [newChannel, setNewChannel] = useState("");
+
   // Scheduler
-  const [scheduledTasks, setScheduledTasks] = useState<Record<string, ScheduledTask[]>>({});
+  const [scheduledTasks, setScheduledTasks] = useState<Record<string, ScheduledTask[]>>(() => loadJSON("tg_scheduledTasks", {}));
   const [addingTask, setAddingTask] = useState(false);
   const [newTaskChatId, setNewTaskChatId] = useState("");
   const [newTaskMessage, setNewTaskMessage] = useState("");
@@ -78,10 +91,18 @@ const Systems = () => {
   const [newTaskRepeat, setNewTaskRepeat] = useState("once");
 
   // Auto-delete
-  const [autoDeleteRules, setAutoDeleteRules] = useState<Record<string, AutoDeleteRule[]>>({});
+  const [autoDeleteRules, setAutoDeleteRules] = useState<Record<string, AutoDeleteRule[]>>(() => loadJSON("tg_autoDeleteRules", {}));
   const [addingRule, setAddingRule] = useState(false);
   const [newRuleChatId, setNewRuleChatId] = useState("");
   const [newRuleDelay, setNewRuleDelay] = useState("5m");
+
+  // Persist to localStorage
+  useEffect(() => { saveJSON("tg_systems", systems); }, [systems]);
+  useEffect(() => { saveJSON("tg_allowedUsers", allowedUsers); }, [allowedUsers]);
+  useEffect(() => { saveJSON("tg_allowedGroups", allowedGroups); }, [allowedGroups]);
+  useEffect(() => { saveJSON("tg_channels", channels); }, [channels]);
+  useEffect(() => { saveJSON("tg_scheduledTasks", scheduledTasks); }, [scheduledTasks]);
+  useEffect(() => { saveJSON("tg_autoDeleteRules", autoDeleteRules); }, [autoDeleteRules]);
 
   const now = () => new Date().toLocaleTimeString("en-US", { hour12: false });
 
@@ -149,6 +170,14 @@ const Systems = () => {
     toast.success("Group added.");
   };
 
+  const addChannelEntry = () => {
+    if (!newChannel.trim()) return;
+    const val = newChannel.trim().toUpperCase().replace(/^@/, "");
+    setChannels((prev) => ({ ...prev, [sysId]: [...(prev[sysId] || []), val] }));
+    setNewChannel(""); setAddingChannel(false);
+    toast.success("Channel added.");
+  };
+
   const addScheduledTask = () => {
     if (!newTaskChatId.trim() || !newTaskMessage.trim() || !newTaskTime.trim()) {
       toast.error("Fill all fields."); return;
@@ -211,7 +240,7 @@ const Systems = () => {
         {header}
         <div className="max-w-3xl mx-auto p-5 space-y-5">
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setView("list"); setManagingSystem(null); setAddingUser(false); setAddingGroup(false); setAddingTask(false); setAddingRule(false); }}>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setView("list"); setManagingSystem(null); setAddingUser(false); setAddingGroup(false); setAddingTask(false); setAddingRule(false); setAddingChannel(false); }}>
               <ArrowLeft className="w-4 h-4" />
             </Button>
             <div className="flex items-center gap-2.5">
@@ -226,6 +255,7 @@ const Systems = () => {
             <TabsList className="w-full justify-start bg-muted/50 border border-border h-auto p-1 flex-wrap">
               {[
                 { value: "access", icon: Shield, label: "Access Control" },
+                { value: "channels", icon: Hash, label: "Channels" },
                 { value: "scheduler", icon: Clock, label: "Scheduler" },
                 { value: "auto-delete", icon: Trash2, label: "Auto-Delete" },
                 { value: "live-feed", icon: MessageSquare, label: "Live Feed" },
@@ -303,6 +333,60 @@ const Systems = () => {
                       </div>
                     )}
                   </div>
+                </div>
+              </GlowCard>
+            </TabsContent>
+
+            {/* CHANNELS */}
+            <TabsContent value="channels" className="mt-5">
+              <GlowCard title="Channels" subtitle="Channels where the bot has admin + post permission">
+                <div className="space-y-3">
+                  <div className="flex justify-end">
+                    <Button size="sm" variant="outline" className="text-xs h-7" onClick={() => setAddingChannel(true)}>
+                      <Plus className="w-3 h-3 mr-1" /> Add Channel
+                    </Button>
+                  </div>
+                  {addingChannel && (
+                    <div className="p-3 rounded-md bg-muted/50 border border-border space-y-3">
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Channel Username</Label>
+                        <Input
+                          placeholder="e.g. @MyChannel or MYCHANNEL"
+                          value={newChannel}
+                          onChange={(e) => setNewChannel(e.target.value)}
+                          className="text-sm h-8 font-mono uppercase"
+                          autoFocus
+                          onKeyDown={(e) => { if (e.key === "Enter") addChannelEntry(); }}
+                        />
+                        <p className="text-xs text-muted-foreground">Enter the channel username (short name). It will be stored in uppercase.</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button size="sm" className="text-xs" onClick={addChannelEntry}>Save</Button>
+                        <Button size="sm" variant="ghost" className="text-xs" onClick={() => { setAddingChannel(false); setNewChannel(""); }}>Cancel</Button>
+                      </div>
+                    </div>
+                  )}
+                  {(channels[sysId] || []).length === 0 && !addingChannel ? (
+                    <div className="p-6 text-center">
+                      <Hash className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+                      <p className="text-sm text-muted-foreground">No channels added yet.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      {(channels[sysId] || []).map((ch, i) => (
+                        <div key={i} className="flex items-center justify-between py-1.5 px-2 rounded bg-background border border-border">
+                          <div className="flex items-center gap-2">
+                            <Hash className="w-3.5 h-3.5 text-muted-foreground" />
+                            <span className="text-xs font-mono font-semibold text-foreground">@{ch}</span>
+                          </div>
+                          <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive" onClick={() => {
+                            setChannels((prev) => ({ ...prev, [sysId]: (prev[sysId] || []).filter((_, idx) => idx !== i) }));
+                            toast.success("Channel removed.");
+                          }}><X className="w-3 h-3" /></Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </GlowCard>
             </TabsContent>
