@@ -75,22 +75,13 @@ const DashboardLayout = () => {
           ))}
         </nav>
 
-        <div className="p-2 border-t border-border space-y-2">
+        <div className="p-2 border-t border-border">
           {!collapsed && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono px-2">
               <Zap className="w-3 h-3 text-accent animate-pulse-glow" />
               <span>System Online</span>
             </div>
           )}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setCollapsed(!collapsed)}
-            className="w-full h-8 text-muted-foreground hover:text-foreground"
-            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {collapsed ? <PanelLeft className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
-          </Button>
         </div>
       </aside>
 
