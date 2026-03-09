@@ -405,11 +405,15 @@ async function handlePost(botToken: string, systemId: string, chatId: number, us
     return;
   }
 
-  const messageText = replyToMessage.text || replyToMessage.caption || "";
-  if (!messageText) {
+  const rawText = replyToMessage.text || replyToMessage.caption || "";
+  if (!rawText) {
     await sendMessage(botToken, chatId, "❌ The replied message has no text content.");
     return;
   }
+
+  // Convert entities to HTML to preserve formatting (bold, italic, links, etc.)
+  const entities = replyToMessage.entities || replyToMessage.caption_entities;
+  const messageText = entitiesToHtml(rawText, entities);
 
   // Save scheduled post
   const { data, error } = await supabase.from("scheduled_posts").insert({
