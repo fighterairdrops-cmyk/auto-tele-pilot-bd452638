@@ -13,13 +13,24 @@ const supabase = createClient(
 
 // ─── Telegram helpers ───
 
-async function sendMessage(botToken: string, chatId: string | number, text: string) {
+async function sendMessage(botToken: string, chatId: string | number, text: string, parseMode: string = "HTML") {
   const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" }),
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: parseMode }),
   });
   const result = await res.json();
+  if (!result.ok && parseMode === "HTML") {
+    // Fallback: strip HTML tags and send as plain text
+    console.error("sendMessage HTML failed, retrying plain:", JSON.stringify(result));
+    const plainText = text.replace(/<[^>]*>/g, '');
+    const res2 = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: plainText }),
+    });
+    return await res2.json();
+  }
   if (!result.ok) console.error("sendMessage failed:", JSON.stringify(result));
   return result;
 }
@@ -91,72 +102,112 @@ async function getAutoDeleteRules(systemId: string, chatId: number) {
 }
 
 // ─── Telegram entities → HTML converter ───
+// Uses a proper nesting approach: entities are sorted and applied per-character
+// to guarantee valid HTML nesting even with overlapping entities.
 
 function entitiesToHtml(text: string, entities: any[] | undefined): string {
   if (!entities || entities.length === 0) return escapeHtml(text);
 
-  // Convert string to array of code points for proper Unicode handling
-  const codePoints = [...text];
-  
-  // Build list of insertions: { position, opening/closing, priority, html }
-  const insertions: { pos: number; type: 'open' | 'close'; priority: number; html: string }[] = [];
+  try {
+    const codePoints = [...text];
+    
+    // Sort entities by offset, then by length descending (longer entities wrap shorter ones)
+    const sorted = [...entities]
+      .filter(e => getTag(e) !== null)
+      .sort((a, b) => a.offset - b.offset || b.length - a.length);
 
-  for (const e of entities) {
-    const start = e.offset;
-    const end = e.offset + e.length;
-    let open = '';
-    let close = '';
-
-    switch (e.type) {
-      case 'bold':            open = '<b>'; close = '</b>'; break;
-      case 'italic':          open = '<i>'; close = '</i>'; break;
-      case 'underline':       open = '<u>'; close = '</u>'; break;
-      case 'strikethrough':   open = '<s>'; close = '</s>'; break;
-      case 'spoiler':         open = '<tg-spoiler>'; close = '</tg-spoiler>'; break;
-      case 'code':            open = '<code>'; close = '</code>'; break;
-      case 'pre':
-        open = e.language ? `<pre><code class="language-${escapeHtml(e.language)}">` : '<pre>';
-        close = e.language ? '</code></pre>' : '</pre>';
-        break;
-      case 'text_link':
-        open = `<a href="${escapeHtml(e.url || '')}">`;
-        close = '</a>';
-        break;
-      case 'text_mention':
-        open = `<a href="tg://user?id=${e.user?.id || ''}">`;
-        close = '</a>';
-        break;
-      case 'blockquote':      open = '<blockquote>'; close = '</blockquote>'; break;
-      default: continue;
+    // Apply entities one at a time, building valid nested HTML
+    // We process each entity independently and wrap the appropriate substring
+    let result = '';
+    
+    // For each character position, track which entities are active
+    const charTags: { open: string; close: string }[][] = codePoints.map(() => []);
+    
+    for (const e of sorted) {
+      const tag = getTag(e);
+      if (!tag) continue;
+      const start = e.offset;
+      const end = Math.min(e.offset + e.length, codePoints.length);
+      // Add open tag at start position and close tag at end-1 position
+      if (start < codePoints.length) {
+        charTags[start].unshift({ open: tag.open, close: tag.close }); // unshift = outermost first
+      }
     }
 
-    insertions.push({ pos: start, type: 'open', priority: end - start, html: open });
-    insertions.push({ pos: end, type: 'close', priority: -(end - start), html: close });
-  }
-
-  // Sort: by position, then closes before opens at same position, then by priority
-  insertions.sort((a, b) => {
-    if (a.pos !== b.pos) return a.pos - b.pos;
-    if (a.type !== b.type) return a.type === 'close' ? -1 : 1;
-    return a.priority - b.priority;
-  });
-
-  let result = '';
-  let lastPos = 0;
-
-  for (const ins of insertions) {
-    if (ins.pos > lastPos) {
-      result += escapeHtml(codePoints.slice(lastPos, ins.pos).join(''));
+    // Build result character by character
+    // Track active tags with a stack
+    const activeStack: { close: string; end: number }[] = [];
+    
+    for (let i = 0; i < codePoints.length; i++) {
+      // Close tags that end at this position (in reverse order for proper nesting)
+      const toClose: string[] = [];
+      const toReopen: { close: string; end: number; open: string }[] = [];
+      
+      // Remove expired tags
+      while (activeStack.length > 0 && activeStack[activeStack.length - 1].end <= i) {
+        const tag = activeStack.pop()!;
+        toClose.push(tag.close);
+      }
+      
+      // Check if any inner tags need closing before outer ones
+      // Close all tags that end at position i
+      const closing: number[] = [];
+      for (let j = activeStack.length - 1; j >= 0; j--) {
+        if (activeStack[j].end <= i) {
+          closing.push(j);
+        }
+      }
+      
+      result += toClose.join('');
+      
+      // Open new tags at this position
+      for (const e of sorted) {
+        if (e.offset === i) {
+          const tag = getTag(e);
+          if (!tag) continue;
+          const end = Math.min(e.offset + e.length, codePoints.length);
+          result += tag.open;
+          activeStack.push({ close: tag.close, end });
+        }
+      }
+      
+      // Output character
+      result += escapeHtml(codePoints[i]);
+      
+      // Close tags that end right after this character
+      const nowClose: string[] = [];
+      while (activeStack.length > 0 && activeStack[activeStack.length - 1].end <= i + 1) {
+        nowClose.push(activeStack.pop()!.close);
+      }
+      result += nowClose.join('');
     }
-    result += ins.html;
-    lastPos = ins.pos;
+    
+    // Close any remaining
+    while (activeStack.length > 0) {
+      result += activeStack.pop()!.close;
+    }
+    
+    return result;
+  } catch (err) {
+    console.error("entitiesToHtml error, falling back to plain text:", err);
+    return escapeHtml(text);
   }
+}
 
-  if (lastPos < codePoints.length) {
-    result += escapeHtml(codePoints.slice(lastPos).join(''));
+function getTag(e: any): { open: string; close: string } | null {
+  switch (e.type) {
+    case 'bold':            return { open: '<b>', close: '</b>' };
+    case 'italic':          return { open: '<i>', close: '</i>' };
+    case 'underline':       return { open: '<u>', close: '</u>' };
+    case 'strikethrough':   return { open: '<s>', close: '</s>' };
+    case 'spoiler':         return { open: '<tg-spoiler>', close: '</tg-spoiler>' };
+    case 'code':            return { open: '<code>', close: '</code>' };
+    case 'pre':             return { open: e.language ? `<pre><code class="language-${escapeHtml(e.language)}">` : '<pre>', close: e.language ? '</code></pre>' : '</pre>' };
+    case 'text_link':       return { open: `<a href="${escapeHtml(e.url || '')}">`, close: '</a>' };
+    case 'text_mention':    return { open: `<a href="tg://user?id=${e.user?.id || ''}">`, close: '</a>' };
+    case 'blockquote':      return { open: '<blockquote>', close: '</blockquote>' };
+    default: return null;
   }
-
-  return result;
 }
 
 function escapeHtml(s: string): string {
