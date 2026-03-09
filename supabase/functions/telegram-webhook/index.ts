@@ -13,25 +13,107 @@ const supabase = createClient(
 
 // ─── Telegram helpers ───
 
-async function sendMessage(botToken: string, chatId: string | number, text: string, parseMode: string = "HTML") {
-  const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+async function sendTelegramMessage(botToken: string, chatId: string | number, text: string, mediaFileId?: string | null, mediaType?: string | null) {
+  try {
+    // If there's media, send it with caption
+    if (mediaFileId && mediaType) {
+      return await sendMedia(botToken, chatId, mediaFileId, mediaType, text);
+    }
+    // Text-only message
+    return await sendTextMessage(botToken, chatId, text);
+  } catch (err) {
+    console.error("sendTelegramMessage error:", err);
+    // Ultimate fallback: plain text no formatting
+    try {
+      const plain = text.replace(/<[^>]*>/g, '');
+      const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text: plain }),
+      });
+      return await res.json();
+    } catch (e2) {
+      console.error("Final fallback also failed:", e2);
+      return { ok: false };
+    }
+  }
+}
+
+async function sendTextMessage(botToken: string, chatId: string | number, text: string) {
+  // Try HTML first
+  let res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: parseMode }),
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" }),
   });
-  const result = await res.json();
-  if (!result.ok && parseMode === "HTML") {
-    // Fallback: strip HTML tags and send as plain text
-    console.error("sendMessage HTML failed, retrying plain:", JSON.stringify(result));
-    const plainText = text.replace(/<[^>]*>/g, '');
-    const res2 = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+  let result = await res.json();
+  if (result.ok) return result;
+
+  // Fallback: plain text
+  console.error("HTML send failed, retrying plain:", result.description);
+  const plain = text.replace(/<[^>]*>/g, '');
+  res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text: plain }),
+  });
+  return await res.json();
+}
+
+async function sendMedia(botToken: string, chatId: string | number, fileId: string, mediaType: string, caption?: string) {
+  const methodMap: Record<string, string> = {
+    photo: "sendPhoto",
+    video: "sendVideo",
+    document: "sendDocument",
+    audio: "sendAudio",
+    voice: "sendVoice",
+    video_note: "sendVideoNote",
+    animation: "sendAnimation",
+    sticker: "sendSticker",
+  };
+
+  const method = methodMap[mediaType] || "sendDocument";
+  const fieldMap: Record<string, string> = {
+    photo: "photo",
+    video: "video",
+    document: "document",
+    audio: "audio",
+    voice: "voice",
+    video_note: "video_note",
+    animation: "animation",
+    sticker: "sticker",
+  };
+  const field = fieldMap[mediaType] || "document";
+
+  const body: any = { chat_id: chatId, [field]: fileId };
+  
+  // Add caption if available (stickers and video_notes don't support captions)
+  if (caption && mediaType !== "sticker" && mediaType !== "video_note") {
+    body.caption = caption;
+    body.parse_mode = "HTML";
+  }
+
+  let res = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  let result = await res.json();
+
+  // If HTML caption failed, retry without parse_mode
+  if (!result.ok && caption && body.parse_mode) {
+    console.error(`Media HTML caption failed: ${result.description}, retrying plain`);
+    body.caption = caption.replace(/<[^>]*>/g, '');
+    delete body.parse_mode;
+    res = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text: plainText }),
+      body: JSON.stringify(body),
     });
-    return await res2.json();
+    result = await res.json();
   }
-  if (!result.ok) console.error("sendMessage failed:", JSON.stringify(result));
+
+  if (!result.ok) console.error(`sendMedia ${method} failed:`, result.description);
   return result;
 }
 
@@ -102,94 +184,57 @@ async function getAutoDeleteRules(systemId: string, chatId: number) {
 }
 
 // ─── Telegram entities → HTML converter ───
-// Uses a proper nesting approach: entities are sorted and applied per-character
-// to guarantee valid HTML nesting even with overlapping entities.
+// Simple, safe approach: sort entities, apply non-overlapping ones, skip conflicts.
 
 function entitiesToHtml(text: string, entities: any[] | undefined): string {
   if (!entities || entities.length === 0) return escapeHtml(text);
 
   try {
-    const codePoints = [...text];
+    const codePoints = [...text]; // handle unicode properly
     
-    // Sort entities by offset, then by length descending (longer entities wrap shorter ones)
-    const sorted = [...entities]
-      .filter(e => getTag(e) !== null)
-      .sort((a, b) => a.offset - b.offset || b.length - a.length);
+    // Sort by offset asc, then length desc
+    const sorted = [...entities].sort((a, b) => a.offset - b.offset || b.length - a.length);
+    
+    // Build insertions: for each entity, compute open/close tags at positions
+    const inserts: { pos: number; order: number; tag: string }[] = [];
+    let entityIdx = 0;
 
-    // Apply entities one at a time, building valid nested HTML
-    // We process each entity independently and wrap the appropriate substring
-    let result = '';
-    
-    // For each character position, track which entities are active
-    const charTags: { open: string; close: string }[][] = codePoints.map(() => []);
-    
     for (const e of sorted) {
       const tag = getTag(e);
       if (!tag) continue;
       const start = e.offset;
       const end = Math.min(e.offset + e.length, codePoints.length);
-      // Add open tag at start position and close tag at end-1 position
-      if (start < codePoints.length) {
-        charTags[start].unshift({ open: tag.open, close: tag.close }); // unshift = outermost first
+      // Use entityIdx to ensure proper nesting: later entities open after earlier ones at same position,
+      // and close before earlier ones at same position
+      inserts.push({ pos: start, order: entityIdx, tag: tag.open });
+      inserts.push({ pos: end, order: -entityIdx, tag: tag.close }); // negative = close before open at same pos
+      entityIdx++;
+    }
+
+    // Sort: by position, then closes before opens (negative order first), then opens in order
+    inserts.sort((a, b) => {
+      if (a.pos !== b.pos) return a.pos - b.pos;
+      return a.order - b.order;
+    });
+
+    // Build result
+    let result = '';
+    let insertIdx = 0;
+    
+    for (let i = 0; i <= codePoints.length; i++) {
+      // Insert all tags at this position
+      while (insertIdx < inserts.length && inserts[insertIdx].pos === i) {
+        result += inserts[insertIdx].tag;
+        insertIdx++;
+      }
+      if (i < codePoints.length) {
+        result += escapeHtml(codePoints[i]);
       }
     }
 
-    // Build result character by character
-    // Track active tags with a stack
-    const activeStack: { close: string; end: number }[] = [];
-    
-    for (let i = 0; i < codePoints.length; i++) {
-      // Close tags that end at this position (in reverse order for proper nesting)
-      const toClose: string[] = [];
-      const toReopen: { close: string; end: number; open: string }[] = [];
-      
-      // Remove expired tags
-      while (activeStack.length > 0 && activeStack[activeStack.length - 1].end <= i) {
-        const tag = activeStack.pop()!;
-        toClose.push(tag.close);
-      }
-      
-      // Check if any inner tags need closing before outer ones
-      // Close all tags that end at position i
-      const closing: number[] = [];
-      for (let j = activeStack.length - 1; j >= 0; j--) {
-        if (activeStack[j].end <= i) {
-          closing.push(j);
-        }
-      }
-      
-      result += toClose.join('');
-      
-      // Open new tags at this position
-      for (const e of sorted) {
-        if (e.offset === i) {
-          const tag = getTag(e);
-          if (!tag) continue;
-          const end = Math.min(e.offset + e.length, codePoints.length);
-          result += tag.open;
-          activeStack.push({ close: tag.close, end });
-        }
-      }
-      
-      // Output character
-      result += escapeHtml(codePoints[i]);
-      
-      // Close tags that end right after this character
-      const nowClose: string[] = [];
-      while (activeStack.length > 0 && activeStack[activeStack.length - 1].end <= i + 1) {
-        nowClose.push(activeStack.pop()!.close);
-      }
-      result += nowClose.join('');
-    }
-    
-    // Close any remaining
-    while (activeStack.length > 0) {
-      result += activeStack.pop()!.close;
-    }
-    
     return result;
   } catch (err) {
-    console.error("entitiesToHtml error, falling back to plain text:", err);
+    console.error("entitiesToHtml error, falling back to plain:", err);
     return escapeHtml(text);
   }
 }
@@ -212,6 +257,23 @@ function getTag(e: any): { open: string; close: string } | null {
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ─── Media extractor ───
+
+function extractMedia(msg: any): { fileId: string; type: string } | null {
+  if (msg.photo && msg.photo.length > 0) {
+    // Get largest photo
+    return { fileId: msg.photo[msg.photo.length - 1].file_id, type: "photo" };
+  }
+  if (msg.video) return { fileId: msg.video.file_id, type: "video" };
+  if (msg.document) return { fileId: msg.document.file_id, type: "document" };
+  if (msg.audio) return { fileId: msg.audio.file_id, type: "audio" };
+  if (msg.voice) return { fileId: msg.voice.file_id, type: "voice" };
+  if (msg.video_note) return { fileId: msg.video_note.file_id, type: "video_note" };
+  if (msg.animation) return { fileId: msg.animation.file_id, type: "animation" };
+  if (msg.sticker) return { fileId: msg.sticker.file_id, type: "sticker" };
+  return null;
 }
 
 // ─── Duration parser ───
@@ -252,19 +314,21 @@ async function handleAutoDelete(botToken: string, systemId: string, chatId: numb
 async function handleStart(botToken: string, systemLabel: string, chatId: number, userId: number, systemId: string) {
   const admin = await isAdmin(systemId, userId);
 
-  let text = `👋 <b>Welcome to ${systemLabel}!</b>\n\n`;
+  let text = `👋 <b>Welcome to ${escapeHtml(systemLabel)}!</b>\n\n`;
   text += `📋 <b>User Commands:</b>\n`;
   text += `/start - Show this message\n`;
   text += `/id - Get chat/user ID\n`;
-  text += `/post every(1h) time(3) - Schedule post (reply to a message)\n`;
+  text += `/post every(1h) time(3) - Schedule post to all channels\n`;
+  text += `/post every(1h) time(3) @ch1 @ch2 - Post to specific channels\n`;
   text += `/myposts - View your scheduled posts\n`;
   text += `/stop &lt;post_id&gt; - Cancel a scheduled post\n`;
   text += `/channels - List all channels\n`;
   text += `/myaccess - Show channels you can post to\n`;
   text += `/help - Show this message\n`;
+  text += `\n💡 <b>Supports:</b> Text, photos, videos, documents, audio, voice, GIFs with formatting (bold, italic, links, etc.)`;
 
   if (admin) {
-    text += `\n🔑 <b>Admin Commands:</b>\n`;
+    text += `\n\n🔑 <b>Admin Commands:</b>\n`;
     text += `/access @ch1 @ch2 - Grant channel access (reply to user)\n`;
     text += `/remove @ch1 - Remove channel access (reply to user)\n`;
     text += `/addadmin - Make user admin (reply to user)\n`;
@@ -273,7 +337,7 @@ async function handleStart(botToken: string, systemLabel: string, chatId: number
     text += `/stopall - Cancel all scheduled posts\n`;
   }
 
-  await sendMessage(botToken, chatId, text);
+  await sendTelegramMessage(botToken, chatId, text);
 }
 
 // ─── Command: /access (admin only) ───
@@ -281,17 +345,17 @@ async function handleStart(botToken: string, systemLabel: string, chatId: number
 async function handleAccess(botToken: string, systemId: string, chatId: number, userId: number, args: string[], replyToMessage: any) {
   const admin = await isAdmin(systemId, userId);
   if (!admin) {
-    await sendMessage(botToken, chatId, "❌ Only admins can grant access.");
+    await sendTelegramMessage(botToken, chatId, "❌ Only admins can grant access.");
     return;
   }
 
   if (!replyToMessage || !replyToMessage.from) {
-    await sendMessage(botToken, chatId, "❌ Reply to a user's message with /access @channel1 @channel2");
+    await sendTelegramMessage(botToken, chatId, "❌ Reply to a user's message with /access @channel1 @channel2");
     return;
   }
 
   if (args.length === 0) {
-    await sendMessage(botToken, chatId, "❌ Specify channels: /access @channel1 @channel2");
+    await sendTelegramMessage(botToken, chatId, "❌ Specify channels: /access @channel1 @channel2");
     return;
   }
 
@@ -299,7 +363,6 @@ async function handleAccess(botToken: string, systemId: string, chatId: number, 
   const targetName = replyToMessage.from.first_name || targetUserId;
   const channels = args.map(a => a.replace(/^@/, "").toUpperCase());
 
-  // Verify channels exist in system
   const systemChannels = await getChannels(systemId);
   const systemChannelsUpper = systemChannels.map(c => c.toUpperCase());
   const valid: string[] = [];
@@ -313,7 +376,6 @@ async function handleAccess(botToken: string, systemId: string, chatId: number, 
     }
   }
 
-  // Ensure user is in allowed_users
   const userExists = await isUserAllowed(systemId, parseInt(targetUserId));
   if (!userExists) {
     await supabase.from("allowed_users").insert({
@@ -323,7 +385,6 @@ async function handleAccess(botToken: string, systemId: string, chatId: number, 
     });
   }
 
-  // Grant access
   let granted = 0;
   for (const ch of valid) {
     const { error } = await supabase.from("user_channel_access").upsert({
@@ -335,11 +396,11 @@ async function handleAccess(botToken: string, systemId: string, chatId: number, 
     if (!error) granted++;
   }
 
-  let msg = `✅ Granted <b>${targetName}</b> access to ${granted} channel(s): ${valid.map(c => `@${c}`).join(", ")}`;
+  let msg = `✅ Granted <b>${escapeHtml(targetName)}</b> access to ${granted} channel(s): ${valid.map(c => `@${c}`).join(", ")}`;
   if (invalid.length > 0) {
     msg += `\n⚠️ Unknown channels: ${invalid.map(c => `@${c}`).join(", ")}`;
   }
-  await sendMessage(botToken, chatId, msg);
+  await sendTelegramMessage(botToken, chatId, msg);
 }
 
 // ─── Command: /revoke (admin only) ───
@@ -347,12 +408,12 @@ async function handleAccess(botToken: string, systemId: string, chatId: number, 
 async function handleRevoke(botToken: string, systemId: string, chatId: number, userId: number, args: string[], replyToMessage: any) {
   const admin = await isAdmin(systemId, userId);
   if (!admin) {
-    await sendMessage(botToken, chatId, "❌ Only admins can revoke access.");
+    await sendTelegramMessage(botToken, chatId, "❌ Only admins can revoke access.");
     return;
   }
 
   if (!replyToMessage || !replyToMessage.from) {
-    await sendMessage(botToken, chatId, "❌ Reply to a user's message with /revoke @channel1");
+    await sendTelegramMessage(botToken, chatId, "❌ Reply to a user's message with /revoke @channel1");
     return;
   }
 
@@ -371,7 +432,7 @@ async function handleRevoke(botToken: string, systemId: string, chatId: number, 
     if (!error) revoked++;
   }
 
-  await sendMessage(botToken, chatId, `✅ Revoked ${revoked} channel(s) from <b>${targetName}</b>.`);
+  await sendTelegramMessage(botToken, chatId, `✅ Revoked ${revoked} channel(s) from <b>${escapeHtml(targetName)}</b>.`);
 }
 
 // ─── Command: /addadmin & /removeadmin ───
@@ -379,19 +440,18 @@ async function handleRevoke(botToken: string, systemId: string, chatId: number, 
 async function handleAdminToggle(botToken: string, systemId: string, chatId: number, userId: number, makeAdmin: boolean, replyToMessage: any) {
   const admin = await isAdmin(systemId, userId);
   if (!admin) {
-    await sendMessage(botToken, chatId, "❌ Only admins can do this.");
+    await sendTelegramMessage(botToken, chatId, "❌ Only admins can do this.");
     return;
   }
 
   if (!replyToMessage || !replyToMessage.from) {
-    await sendMessage(botToken, chatId, "❌ Reply to a user's message.");
+    await sendTelegramMessage(botToken, chatId, "❌ Reply to a user's message.");
     return;
   }
 
   const targetUserId = replyToMessage.from.id.toString();
   const targetName = replyToMessage.from.first_name || targetUserId;
 
-  // Ensure user exists
   const userExists = await isUserAllowed(systemId, parseInt(targetUserId));
   if (!userExists) {
     await supabase.from("allowed_users").insert({
@@ -408,86 +468,133 @@ async function handleAdminToggle(botToken: string, systemId: string, chatId: num
   }
 
   const action = makeAdmin ? "promoted to admin" : "removed from admin";
-  await sendMessage(botToken, chatId, `✅ <b>${targetName}</b> has been ${action}.`);
+  await sendTelegramMessage(botToken, chatId, `✅ <b>${escapeHtml(targetName)}</b> has been ${action}.`);
 }
 
-// ─── Command: /post every() time() ───
+// ─── Command: /post every() time() [@channels...] ───
 
 async function handlePost(botToken: string, systemId: string, chatId: number, userId: number, text: string, replyToMessage: any) {
-  // Parse: /post every(5m) time(3)
+  // Parse: /post every(5m) time(3) [@ch1 @ch2 ...]
   const everyMatch = text.match(/every\((\d+[mhd])\)/i);
   const timeMatch = text.match(/time\((\d+)\)/i);
 
   if (!everyMatch || !timeMatch) {
-    await sendMessage(botToken, chatId,
-      "📝 <b>Usage:</b> Reply to a message with:\n<code>/post every(5m) time(3)</code>\n\nDurations: 1m, 5m, 15m, 1h, 6h, 24h, 1d\nTimes: how many times to post");
+    await sendTelegramMessage(botToken, chatId,
+      "📝 <b>Usage:</b> Reply to a message with:\n<code>/post every(5m) time(3)</code>\n<code>/post every(1h) time(5) @channel1 @channel2</code>\n\nDurations: 1m-60m, 1h-24h, 1d\nTimes: how many times to post\nChannels: optional, defaults to all your channels");
     return;
   }
 
   if (!replyToMessage) {
-    await sendMessage(botToken, chatId, "❌ Reply to a message to schedule it for posting.");
+    await sendTelegramMessage(botToken, chatId, "❌ Reply to a message to schedule it for posting.");
     return;
   }
 
   const intervalSeconds = parseDuration(everyMatch[1]);
   if (!intervalSeconds) {
-    await sendMessage(botToken, chatId, "❌ Invalid duration. Use: 1m, 5m, 15m, 1h, 6h, 24h, 1d");
+    await sendTelegramMessage(botToken, chatId, "❌ Invalid duration. Use: 1m-60m, 1h-24h, 1d");
     return;
   }
 
   const totalTimes = parseInt(timeMatch[1]);
   if (totalTimes < 1 || totalTimes > 100) {
-    await sendMessage(botToken, chatId, "❌ Times must be between 1 and 100.");
+    await sendTelegramMessage(botToken, chatId, "❌ Times must be between 1 and 100.");
     return;
   }
 
-  // Check what channels user can post to
+  // Parse specific channel targets from the command text
+  // Extract @channel mentions that are NOT part of every() or time()
+  const channelMatches = text.match(/@(\w+)/g);
+  const specifiedChannels: string[] = [];
+  if (channelMatches) {
+    for (const m of channelMatches) {
+      const name = m.slice(1); // remove @
+      // Skip if it looks like a bot username in the command itself (e.g. /post@botname)
+      if (text.indexOf(`/${name}`) >= 0) continue;
+      specifiedChannels.push(name.toUpperCase());
+    }
+  }
+
+  // Get user's accessible channels
   const adminStatus = await isAdmin(systemId, userId);
-  let channels: string[];
-
+  let accessibleChannels: string[];
   if (adminStatus) {
-    channels = await getChannels(systemId);
+    accessibleChannels = await getChannels(systemId);
   } else {
-    channels = await getUserChannelAccess(systemId, userId);
+    accessibleChannels = await getUserChannelAccess(systemId, userId);
   }
 
-  if (channels.length === 0) {
-    await sendMessage(botToken, chatId, "❌ You don't have access to any channels. Ask an admin to grant you access with /access.");
+  if (accessibleChannels.length === 0) {
+    await sendTelegramMessage(botToken, chatId, "❌ You don't have access to any channels. Ask an admin to grant you access with /access.");
     return;
   }
 
+  // Determine target channels
+  let targetChannels: string[];
+  if (specifiedChannels.length > 0) {
+    // Validate specified channels against user's access
+    const accessibleUpper = accessibleChannels.map(c => c.toUpperCase());
+    const valid: string[] = [];
+    const invalid: string[] = [];
+    for (const ch of specifiedChannels) {
+      if (accessibleUpper.includes(ch)) {
+        valid.push(ch);
+      } else {
+        invalid.push(ch);
+      }
+    }
+    if (valid.length === 0) {
+      await sendTelegramMessage(botToken, chatId,
+        `❌ You don't have access to any of the specified channels: ${specifiedChannels.map(c => `@${c}`).join(", ")}\n\nUse /myaccess to see your channels.`);
+      return;
+    }
+    if (invalid.length > 0) {
+      await sendTelegramMessage(botToken, chatId,
+        `⚠️ Skipping channels you don't have access to: ${invalid.map(c => `@${c}`).join(", ")}`);
+    }
+    targetChannels = valid;
+  } else {
+    targetChannels = accessibleChannels.map(c => c.toUpperCase());
+  }
+
+  // Extract text/caption and entities from replied message
   const rawText = replyToMessage.text || replyToMessage.caption || "";
-  if (!rawText) {
-    await sendMessage(botToken, chatId, "❌ The replied message has no text content.");
+  const entities = replyToMessage.entities || replyToMessage.caption_entities;
+  const messageHtml = rawText ? entitiesToHtml(rawText, entities) : "";
+
+  // Extract media from replied message
+  const media = extractMedia(replyToMessage);
+
+  if (!rawText && !media) {
+    await sendTelegramMessage(botToken, chatId, "❌ The replied message has no text or media content.");
     return;
   }
-
-  // Convert entities to HTML to preserve formatting (bold, italic, links, etc.)
-  const entities = replyToMessage.entities || replyToMessage.caption_entities;
-  const messageText = entitiesToHtml(rawText, entities);
 
   // Save scheduled post
   const { data, error } = await supabase.from("scheduled_posts").insert({
     system_id: systemId,
     chat_id: chatId.toString(),
-    message_text: messageText,
+    message_text: messageHtml,
     telegram_user_id: userId.toString(),
     interval_seconds: intervalSeconds,
     total_times: totalTimes,
     times_sent: 0,
     next_run_at: new Date(Date.now() + 3 * 60 * 1000).toISOString(),
     active: true,
+    media_file_id: media?.fileId || null,
+    media_type: media?.type || null,
+    target_channels: targetChannels,
   }).select().single();
 
   if (error) {
     console.error("Error creating scheduled post:", error);
-    await sendMessage(botToken, chatId, "❌ Failed to schedule post.");
+    await sendTelegramMessage(botToken, chatId, "❌ Failed to schedule post.");
     return;
   }
 
-  const chList = channels.map(c => `@${c}`).join(", ");
-  await sendMessage(botToken, chatId,
-    `✅ <b>Post Scheduled!</b>\n\n📝 "${messageText.substring(0, 50)}${messageText.length > 50 ? "..." : ""}"\n📢 Channels: ${chList}\n⏱ Every ${everyMatch[1]}, ${totalTimes} time(s)\n🆔 Post ID: <code>${data.id.substring(0, 8)}</code>`
+  const chList = targetChannels.map(c => `@${c}`).join(", ");
+  const contentDesc = media ? `📎 ${media.type}${messageHtml ? " + text" : ""}` : `📝 text`;
+  await sendTelegramMessage(botToken, chatId,
+    `✅ <b>Post Scheduled!</b>\n\n${contentDesc}\n📢 Channels: ${chList}\n⏱ Every ${everyMatch[1]}, ${totalTimes} time(s)\n⏳ First post in ~3 minutes\n🆔 Post ID: <code>${data.id.substring(0, 8)}</code>`
   );
 }
 
@@ -502,26 +609,28 @@ async function handleMyPosts(botToken: string, systemId: string, chatId: number,
     .eq("active", true);
 
   if (!data || data.length === 0) {
-    await sendMessage(botToken, chatId, "📭 No active scheduled posts.");
+    await sendTelegramMessage(botToken, chatId, "📭 No active scheduled posts.");
     return;
   }
 
   let text = "📋 <b>Your Scheduled Posts:</b>\n\n";
   for (const p of data) {
-    text += `🆔 <code>${p.id.substring(0, 8)}</code>\n`;
-    text += `📝 "${p.message_text.substring(0, 40)}..."\n`;
+    const hasMedia = p.media_type ? `📎 ${p.media_type}` : "📝 text";
+    const channels = p.target_channels ? (p.target_channels as string[]).map((c: string) => `@${c}`).join(", ") : "all";
+    text += `🆔 <code>${p.id.substring(0, 8)}</code> ${hasMedia}\n`;
+    text += `📢 ${channels}\n`;
     text += `📊 ${p.times_sent}/${p.total_times} sent\n`;
-    text += `⏱ Every ${p.interval_seconds}s\n\n`;
+    text += `⏱ Every ${p.interval_seconds >= 3600 ? `${p.interval_seconds / 3600}h` : `${p.interval_seconds / 60}m`}\n\n`;
   }
   text += "Use /stop &lt;post_id&gt; to cancel.";
-  await sendMessage(botToken, chatId, text);
+  await sendTelegramMessage(botToken, chatId, text);
 }
 
 // ─── Command: /stop ───
 
 async function handleStop(botToken: string, systemId: string, chatId: number, userId: number, args: string[]) {
   if (args.length === 0) {
-    await sendMessage(botToken, chatId, "Usage: /stop &lt;post_id&gt;");
+    await sendTelegramMessage(botToken, chatId, "Usage: /stop &lt;post_id&gt;");
     return;
   }
 
@@ -535,12 +644,12 @@ async function handleStop(botToken: string, systemId: string, chatId: number, us
 
   const post = data?.find((p: any) => p.id.startsWith(postIdPrefix));
   if (!post) {
-    await sendMessage(botToken, chatId, "❌ Post not found or not yours.");
+    await sendTelegramMessage(botToken, chatId, "❌ Post not found or not yours.");
     return;
   }
 
   await supabase.from("scheduled_posts").update({ active: false }).eq("id", post.id);
-  await sendMessage(botToken, chatId, `✅ Post <code>${post.id.substring(0, 8)}</code> cancelled.`);
+  await sendTelegramMessage(botToken, chatId, `✅ Post <code>${post.id.substring(0, 8)}</code> cancelled.`);
 }
 
 // ─── Command: /myaccess ───
@@ -549,17 +658,17 @@ async function handleMyAccess(botToken: string, systemId: string, chatId: number
   const admin = await isAdmin(systemId, userId);
   if (admin) {
     const channels = await getChannels(systemId);
-    await sendMessage(botToken, chatId, `🔑 You're an <b>admin</b>. You can post to all channels:\n${channels.map(c => `• @${c}`).join("\n") || "No channels configured."}`);
+    await sendTelegramMessage(botToken, chatId, `🔑 You're an <b>admin</b>. You can post to all channels:\n${channels.map(c => `• @${c}`).join("\n") || "No channels configured."}`);
     return;
   }
 
   const channels = await getUserChannelAccess(systemId, userId);
   if (channels.length === 0) {
-    await sendMessage(botToken, chatId, "❌ You don't have access to any channels. Ask an admin.");
+    await sendTelegramMessage(botToken, chatId, "❌ You don't have access to any channels. Ask an admin.");
     return;
   }
 
-  await sendMessage(botToken, chatId, `📢 <b>Your channel access:</b>\n${channels.map(c => `• @${c}`).join("\n")}`);
+  await sendTelegramMessage(botToken, chatId, `📢 <b>Your channel access:</b>\n${channels.map(c => `• @${c}`).join("\n")}`);
 }
 
 // ─── Command: /allposts (admin) ───
@@ -567,7 +676,7 @@ async function handleMyAccess(botToken: string, systemId: string, chatId: number
 async function handleAllPosts(botToken: string, systemId: string, chatId: number, userId: number) {
   const admin = await isAdmin(systemId, userId);
   if (!admin) {
-    await sendMessage(botToken, chatId, "❌ Only admins can view all posts.");
+    await sendTelegramMessage(botToken, chatId, "❌ Only admins can view all posts.");
     return;
   }
 
@@ -578,17 +687,17 @@ async function handleAllPosts(botToken: string, systemId: string, chatId: number
     .eq("active", true);
 
   if (!data || data.length === 0) {
-    await sendMessage(botToken, chatId, "📭 No active scheduled posts.");
+    await sendTelegramMessage(botToken, chatId, "📭 No active scheduled posts.");
     return;
   }
 
   let text = "📋 <b>All Scheduled Posts:</b>\n\n";
   for (const p of data) {
-    text += `🆔 <code>${p.id.substring(0, 8)}</code> by user ${p.telegram_user_id}\n`;
-    text += `📝 "${p.message_text.substring(0, 40)}..."\n`;
+    const hasMedia = p.media_type ? `📎 ${p.media_type}` : "📝 text";
+    text += `🆔 <code>${p.id.substring(0, 8)}</code> by user ${p.telegram_user_id} ${hasMedia}\n`;
     text += `📊 ${p.times_sent}/${p.total_times} sent\n\n`;
   }
-  await sendMessage(botToken, chatId, text);
+  await sendTelegramMessage(botToken, chatId, text);
 }
 
 // ─── Command: /stopall (admin) ───
@@ -596,7 +705,7 @@ async function handleAllPosts(botToken: string, systemId: string, chatId: number
 async function handleStopAll(botToken: string, systemId: string, chatId: number, userId: number) {
   const admin = await isAdmin(systemId, userId);
   if (!admin) {
-    await sendMessage(botToken, chatId, "❌ Only admins can stop all posts.");
+    await sendTelegramMessage(botToken, chatId, "❌ Only admins can stop all posts.");
     return;
   }
 
@@ -607,7 +716,7 @@ async function handleStopAll(botToken: string, systemId: string, chatId: number,
     .eq("active", true)
     .select();
 
-  await sendMessage(botToken, chatId, `✅ Cancelled ${data?.length || 0} scheduled post(s).`);
+  await sendTelegramMessage(botToken, chatId, `✅ Cancelled ${data?.length || 0} scheduled post(s).`);
 }
 
 // ─── Main handler ───
@@ -651,7 +760,7 @@ serve(async (req) => {
 
     const chatId = message.chat.id;
     const userId = message.from?.id;
-    const text = message.text || "";
+    const text = message.text || message.caption || "";
     const messageId = message.message_id;
     const replyToMessage = message.reply_to_message;
 
@@ -668,7 +777,7 @@ serve(async (req) => {
     const command = parts[0].split("@")[0].toLowerCase();
     const args = parts.slice(1);
 
-    // Access control: check if user/chat is allowed
+    // Access control
     const { data: allUsers } = await supabase
       .from("allowed_users")
       .select("id")
@@ -682,7 +791,7 @@ serve(async (req) => {
       console.log(`Access check: user=${userId}, userAllowed=${userAllowed}, chatAllowed=${chatAllowed}, system=${system.id}`);
       if (!userAllowed && !chatAllowed) {
         if (text.startsWith("/")) {
-          await sendMessage(botToken, chatId, "❌ You are not authorized to use this bot. Ask an admin to add you.");
+          await sendTelegramMessage(botToken, chatId, "❌ You are not authorized to use this bot. Ask an admin to add you.");
         }
         return new Response(JSON.stringify({ ok: true }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -699,7 +808,7 @@ serve(async (req) => {
         break;
 
       case "/id":
-        await sendMessage(botToken, chatId,
+        await sendTelegramMessage(botToken, chatId,
           `🆔 Chat ID: <code>${chatId}</code>\n👤 Your ID: <code>${userId}</code>`
         );
         break;
@@ -740,9 +849,9 @@ serve(async (req) => {
       case "/channels": {
         const channels = await getChannels(system.id);
         if (channels.length === 0) {
-          await sendMessage(botToken, chatId, "No channels configured.");
+          await sendTelegramMessage(botToken, chatId, "No channels configured.");
         } else {
-          await sendMessage(botToken, chatId,
+          await sendTelegramMessage(botToken, chatId,
             `📢 <b>Configured channels:</b>\n${channels.map(c => `• @${c}`).join("\n")}`
           );
         }
