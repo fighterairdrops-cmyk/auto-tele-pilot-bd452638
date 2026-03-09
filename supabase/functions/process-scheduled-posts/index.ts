@@ -57,14 +57,28 @@ serve(async (req) => {
       let success = 0;
       for (const ch of channels) {
         try {
-          const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          // Try HTML first
+          let res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ chat_id: `@${ch}`, text: post.message_text, parse_mode: "HTML" }),
           });
-          const result = await res.json();
-          if (result.ok) success++;
-          else console.error(`Failed to post to @${ch}:`, result.description);
+          let result = await res.json();
+          if (result.ok) {
+            success++;
+          } else {
+            // Fallback: strip HTML and send as plain text
+            console.error(`HTML failed for @${ch}: ${result.description}, retrying plain`);
+            const plainText = post.message_text.replace(/<[^>]*>/g, '');
+            res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ chat_id: `@${ch}`, text: plainText }),
+            });
+            result = await res.json();
+            if (result.ok) success++;
+            else console.error(`Plain text also failed for @${ch}:`, result.description);
+          }
         } catch (e) {
           console.error(`Error posting to @${ch}:`, e);
         }
