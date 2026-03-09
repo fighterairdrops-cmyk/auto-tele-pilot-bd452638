@@ -13,13 +13,24 @@ const supabase = createClient(
 
 // ─── Telegram helpers ───
 
-async function sendMessage(botToken: string, chatId: string | number, text: string) {
+async function sendMessage(botToken: string, chatId: string | number, text: string, parseMode: string = "HTML") {
   const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" }),
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: parseMode }),
   });
   const result = await res.json();
+  if (!result.ok && parseMode === "HTML") {
+    // Fallback: strip HTML tags and send as plain text
+    console.error("sendMessage HTML failed, retrying plain:", JSON.stringify(result));
+    const plainText = text.replace(/<[^>]*>/g, '');
+    const res2 = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: plainText }),
+    });
+    return await res2.json();
+  }
   if (!result.ok) console.error("sendMessage failed:", JSON.stringify(result));
   return result;
 }
