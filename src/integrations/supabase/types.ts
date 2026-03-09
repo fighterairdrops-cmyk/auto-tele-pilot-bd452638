@@ -173,9 +173,12 @@ export type Database = {
           created_at: string
           id: string
           interval_seconds: number
+          media_file_id: string | null
+          media_type: string | null
           message_text: string
           next_run_at: string
           system_id: string
+          target_channels: string[] | null
           telegram_user_id: string
           times_sent: number
           total_times: number
@@ -186,9 +189,12 @@ export type Database = {
           created_at?: string
           id?: string
           interval_seconds?: number
+          media_file_id?: string | null
+          media_type?: string | null
           message_text: string
           next_run_at?: string
           system_id: string
+          target_channels?: string[] | null
           telegram_user_id: string
           times_sent?: number
           total_times?: number
@@ -199,9 +205,12 @@ export type Database = {
           created_at?: string
           id?: string
           interval_seconds?: number
+          media_file_id?: string | null
+          media_type?: string | null
           message_text?: string
           next_run_at?: string
           system_id?: string
+          target_channels?: string[] | null
           telegram_user_id?: string
           times_sent?: number
           total_times?: number
