@@ -90,6 +90,79 @@ async function getAutoDeleteRules(systemId: string, chatId: number) {
   return data || [];
 }
 
+// ─── Telegram entities → HTML converter ───
+
+function entitiesToHtml(text: string, entities: any[] | undefined): string {
+  if (!entities || entities.length === 0) return escapeHtml(text);
+
+  // Convert string to array of code points for proper Unicode handling
+  const codePoints = [...text];
+  
+  // Build list of insertions: { position, opening/closing, priority, html }
+  const insertions: { pos: number; type: 'open' | 'close'; priority: number; html: string }[] = [];
+
+  for (const e of entities) {
+    const start = e.offset;
+    const end = e.offset + e.length;
+    let open = '';
+    let close = '';
+
+    switch (e.type) {
+      case 'bold':            open = '<b>'; close = '</b>'; break;
+      case 'italic':          open = '<i>'; close = '</i>'; break;
+      case 'underline':       open = '<u>'; close = '</u>'; break;
+      case 'strikethrough':   open = '<s>'; close = '</s>'; break;
+      case 'spoiler':         open = '<tg-spoiler>'; close = '</tg-spoiler>'; break;
+      case 'code':            open = '<code>'; close = '</code>'; break;
+      case 'pre':
+        open = e.language ? `<pre><code class="language-${escapeHtml(e.language)}">` : '<pre>';
+        close = e.language ? '</code></pre>' : '</pre>';
+        break;
+      case 'text_link':
+        open = `<a href="${escapeHtml(e.url || '')}">`;
+        close = '</a>';
+        break;
+      case 'text_mention':
+        open = `<a href="tg://user?id=${e.user?.id || ''}">`;
+        close = '</a>';
+        break;
+      case 'blockquote':      open = '<blockquote>'; close = '</blockquote>'; break;
+      default: continue;
+    }
+
+    insertions.push({ pos: start, type: 'open', priority: end - start, html: open });
+    insertions.push({ pos: end, type: 'close', priority: -(end - start), html: close });
+  }
+
+  // Sort: by position, then closes before opens at same position, then by priority
+  insertions.sort((a, b) => {
+    if (a.pos !== b.pos) return a.pos - b.pos;
+    if (a.type !== b.type) return a.type === 'close' ? -1 : 1;
+    return a.priority - b.priority;
+  });
+
+  let result = '';
+  let lastPos = 0;
+
+  for (const ins of insertions) {
+    if (ins.pos > lastPos) {
+      result += escapeHtml(codePoints.slice(lastPos, ins.pos).join(''));
+    }
+    result += ins.html;
+    lastPos = ins.pos;
+  }
+
+  if (lastPos < codePoints.length) {
+    result += escapeHtml(codePoints.slice(lastPos).join(''));
+  }
+
+  return result;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 // ─── Duration parser ───
 
 function parseDuration(s: string): number | null {
