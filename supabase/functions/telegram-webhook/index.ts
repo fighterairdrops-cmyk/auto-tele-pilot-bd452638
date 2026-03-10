@@ -190,39 +190,53 @@ function entitiesToHtml(text: string, entities: any[] | undefined): string {
   if (!entities || entities.length === 0) return escapeHtml(text);
 
   try {
-    const codePoints = [...text]; // handle unicode properly
-    
-    // Sort by offset asc, then length desc
+    // Telegram uses UTF-16 offsets. Convert text to UTF-16 code units for correct indexing.
+    // Build a mapping from UTF-16 offset to code point index.
+    const codePoints = [...text];
+    const utf16ToCp: number[] = []; // utf16ToCp[utf16offset] = codepoint index
+    let utf16Pos = 0;
+    for (let i = 0; i < codePoints.length; i++) {
+      const cp = codePoints[i].codePointAt(0)!;
+      utf16ToCp[utf16Pos] = i;
+      utf16Pos++;
+      if (cp > 0xFFFF) {
+        // Surrogate pair: takes 2 UTF-16 units
+        utf16ToCp[utf16Pos] = i;
+        utf16Pos++;
+      }
+    }
+    // Map the "end" position (one past last char)
+    utf16ToCp[utf16Pos] = codePoints.length;
+
+    const totalUtf16 = utf16Pos;
+
+    // Convert entity offsets from UTF-16 to code point indices
     const sorted = [...entities].sort((a, b) => a.offset - b.offset || b.length - a.length);
-    
-    // Build insertions: for each entity, compute open/close tags at positions
+
     const inserts: { pos: number; order: number; tag: string }[] = [];
     let entityIdx = 0;
 
     for (const e of sorted) {
       const tag = getTag(e);
       if (!tag) continue;
-      const start = e.offset;
-      const end = Math.min(e.offset + e.length, codePoints.length);
-      // Use entityIdx to ensure proper nesting: later entities open after earlier ones at same position,
-      // and close before earlier ones at same position
+      const startUtf16 = e.offset;
+      const endUtf16 = Math.min(e.offset + e.length, totalUtf16);
+      const start = utf16ToCp[startUtf16] ?? codePoints.length;
+      const end = utf16ToCp[endUtf16] ?? codePoints.length;
       inserts.push({ pos: start, order: entityIdx, tag: tag.open });
-      inserts.push({ pos: end, order: -entityIdx, tag: tag.close }); // negative = close before open at same pos
+      inserts.push({ pos: end, order: -entityIdx, tag: tag.close });
       entityIdx++;
     }
 
-    // Sort: by position, then closes before opens (negative order first), then opens in order
     inserts.sort((a, b) => {
       if (a.pos !== b.pos) return a.pos - b.pos;
       return a.order - b.order;
     });
 
-    // Build result
     let result = '';
     let insertIdx = 0;
-    
+
     for (let i = 0; i <= codePoints.length; i++) {
-      // Insert all tags at this position
       while (insertIdx < inserts.length && inserts[insertIdx].pos === i) {
         result += inserts[insertIdx].tag;
         insertIdx++;
