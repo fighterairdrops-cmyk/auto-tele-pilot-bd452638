@@ -139,6 +139,33 @@ export type Database = {
           },
         ]
       }
+      pending_deletions: {
+        Row: {
+          bot_token: string
+          chat_id: string
+          created_at: string
+          delete_at: string
+          id: string
+          message_id: number
+        }
+        Insert: {
+          bot_token: string
+          chat_id: string
+          created_at?: string
+          delete_at: string
+          id?: string
+          message_id: number
+        }
+        Update: {
+          bot_token?: string
+          chat_id?: string
+          created_at?: string
+          delete_at?: string
+          id?: string
+          message_id?: number
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
