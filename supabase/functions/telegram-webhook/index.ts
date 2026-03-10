@@ -300,12 +300,25 @@ function parseDelay(delay: string): number {
 // ─── Auto-delete ───
 
 async function handleAutoDelete(botToken: string, systemId: string, chatId: number, messageId: number) {
-  const rules = await getAutoDeleteRules(systemId, chatId);
-  if (rules.length > 0) {
+  try {
+    const rules = await getAutoDeleteRules(systemId, chatId);
+    if (rules.length === 0) return;
+
     const delay = parseDelay(rules[0].delay);
-    if (delay <= 60000) {
-      setTimeout(() => deleteMessage(botToken, chatId, messageId), delay);
+    const deleteAt = new Date(Date.now() + delay).toISOString();
+
+    const { error } = await supabase.from("pending_deletions").insert({
+      bot_token: botToken,
+      chat_id: chatId.toString(),
+      message_id: messageId,
+      delete_at: deleteAt,
+    });
+
+    if (error) {
+      console.error("Failed to queue auto-delete:", error);
     }
+  } catch (err) {
+    console.error("handleAutoDelete error:", err);
   }
 }
 
