@@ -8,7 +8,71 @@ const supabase = createClient(
 
 // ─── Send media or text to a channel ───
 
-async function sendToChannel(botToken: string, chatId: string, text: string, mediaFileId?: string | null, mediaType?: string | null): Promise<boolean> {
+type SendResult = {
+  ok: boolean;
+  messageId: number | null;
+};
+
+function parseDelay(delay: string): number {
+  const map: Record<string, number> = {
+    "1m": 60000,
+    "5m": 300000,
+    "15m": 900000,
+    "30m": 1800000,
+    "1h": 3600000,
+    "2h": 7200000,
+    "3h": 10800000,
+    "4h": 14400000,
+    "6h": 21600000,
+    "12h": 43200000,
+    "24h": 86400000,
+  };
+  return map[delay] || 300000;
+}
+
+function normalizeChatKey(chatId: string): string {
+  const trimmed = chatId.trim();
+  return trimmed.startsWith("@") ? trimmed.slice(1).toLowerCase() : trimmed.toLowerCase();
+}
+
+function resolveAutoDeleteDelay(rules: Array<{ chat_id: string; delay: string }>, channelChatId: string): number | null {
+  if (!rules || rules.length === 0) return null;
+
+  const normalizedChannel = normalizeChatKey(channelChatId);
+
+  const exact = rules.find((rule) => normalizeChatKey(rule.chat_id) === normalizedChannel);
+  if (exact) return parseDelay(exact.delay);
+
+  const wildcard = rules.find((rule) => {
+    const key = normalizeChatKey(rule.chat_id);
+    return key === "*" || key === "all";
+  });
+  if (wildcard) return parseDelay(wildcard.delay);
+
+  // Fallback: if only one enabled rule exists, treat it as system default duration
+  if (rules.length === 1) {
+    return parseDelay(rules[0].delay);
+  }
+
+  return null;
+}
+
+async function queuePendingDeletion(botToken: string, chatId: string, messageId: number, delayMs: number) {
+  const deleteAt = new Date(Date.now() + delayMs).toISOString();
+
+  const { error } = await supabase.from("pending_deletions").insert({
+    bot_token: botToken,
+    chat_id: chatId,
+    message_id: messageId,
+    delete_at: deleteAt,
+  });
+
+  if (error) {
+    console.error(`Failed to queue deletion for ${chatId}/${messageId}:`, error);
+  }
+}
+
+async function sendToChannel(botToken: string, chatId: string, text: string, mediaFileId?: string | null, mediaType?: string | null): Promise<SendResult> {
   try {
     if (mediaFileId && mediaType) {
       return await sendMedia(botToken, chatId, mediaFileId, mediaType, text);
@@ -16,11 +80,11 @@ async function sendToChannel(botToken: string, chatId: string, text: string, med
     return await sendText(botToken, chatId, text);
   } catch (err) {
     console.error(`sendToChannel error for ${chatId}:`, err);
-    return false;
+    return { ok: false, messageId: null };
   }
 }
 
-async function sendText(botToken: string, chatId: string, text: string): Promise<boolean> {
+async function sendText(botToken: string, chatId: string, text: string): Promise<SendResult> {
   // Try HTML
   let res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: "POST",
@@ -28,7 +92,9 @@ async function sendText(botToken: string, chatId: string, text: string): Promise
     body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" }),
   });
   let result = await res.json();
-  if (result.ok) return true;
+  if (result.ok) {
+    return { ok: true, messageId: result.result?.message_id ?? null };
+  }
 
   // Fallback plain
   console.error(`HTML failed for ${chatId}: ${result.description}, retrying plain`);
@@ -39,12 +105,14 @@ async function sendText(botToken: string, chatId: string, text: string): Promise
     body: JSON.stringify({ chat_id: chatId, text: plain }),
   });
   result = await res.json();
-  if (result.ok) return true;
+  if (result.ok) {
+    return { ok: true, messageId: result.result?.message_id ?? null };
+  }
   console.error(`Plain also failed for ${chatId}:`, result.description);
-  return false;
+  return { ok: false, messageId: null };
 }
 
-async function sendMedia(botToken: string, chatId: string, fileId: string, mediaType: string, caption?: string): Promise<boolean> {
+async function sendMedia(botToken: string, chatId: string, fileId: string, mediaType: string, caption?: string): Promise<SendResult> {
   const methodMap: Record<string, string> = {
     photo: "sendPhoto", video: "sendVideo", document: "sendDocument",
     audio: "sendAudio", voice: "sendVoice", video_note: "sendVideoNote",
@@ -87,9 +155,9 @@ async function sendMedia(botToken: string, chatId: string, fileId: string, media
 
   if (!result.ok) {
     console.error(`sendMedia ${method} failed for ${chatId}:`, result.description);
-    return false;
+    return { ok: false, messageId: null };
   }
-  return true;
+  return { ok: true, messageId: result.result?.message_id ?? null };
 }
 
 serve(async (req) => {
