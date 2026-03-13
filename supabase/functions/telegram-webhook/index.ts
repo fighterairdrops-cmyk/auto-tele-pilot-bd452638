@@ -351,6 +351,27 @@ async function handleAutoDelete(botToken: string, systemId: string, chatId: numb
   }
 }
 
+// Queue a message sent BY the bot for auto-deletion
+async function queueBotMessageForDeletion(botToken: string, chatId: string | number, messageId: number) {
+  // Find system by bot token to get rules
+  const system = await getSystemByToken(botToken);
+  if (!system) return;
+
+  const chatIdNum = typeof chatId === "string" ? parseInt(chatId) : chatId;
+  const rules = await getAutoDeleteRules(system.id, chatIdNum);
+  if (rules.length === 0) return;
+
+  const delay = parseDelay(rules[0].delay);
+  const deleteAt = new Date(Date.now() + delay).toISOString();
+
+  await supabase.from("pending_deletions").insert({
+    bot_token: botToken,
+    chat_id: chatId.toString(),
+    message_id: messageId,
+    delete_at: deleteAt,
+  });
+}
+
 // ─── Command: /start ───
 
 async function handleStart(botToken: string, systemLabel: string, chatId: number, userId: number, systemId: string) {
