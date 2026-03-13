@@ -14,13 +14,15 @@ const supabase = createClient(
 // ─── Telegram helpers ───
 
 async function sendTelegramMessage(botToken: string, chatId: string | number, text: string, mediaFileId?: string | null, mediaType?: string | null) {
+  let result: any;
   try {
     // If there's media, send it with caption
     if (mediaFileId && mediaType) {
-      return await sendMedia(botToken, chatId, mediaFileId, mediaType, text);
+      result = await sendMedia(botToken, chatId, mediaFileId, mediaType, text);
+    } else {
+      // Text-only message
+      result = await sendTextMessage(botToken, chatId, text);
     }
-    // Text-only message
-    return await sendTextMessage(botToken, chatId, text);
   } catch (err) {
     console.error("sendTelegramMessage error:", err);
     // Ultimate fallback: plain text no formatting
@@ -31,12 +33,24 @@ async function sendTelegramMessage(botToken: string, chatId: string | number, te
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ chat_id: chatId, text: plain }),
       });
-      return await res.json();
+      result = await res.json();
     } catch (e2) {
       console.error("Final fallback also failed:", e2);
       return { ok: false };
     }
   }
+
+  // Queue bot's own sent message for auto-deletion if rules exist
+  if (result?.ok && result?.result?.message_id) {
+    try {
+      await queueBotMessageForDeletion(botToken, chatId, result.result.message_id);
+    } catch (e) {
+      // Don't fail the send if auto-delete queueing fails
+      console.error("Failed to queue bot message for deletion:", e);
+    }
+  }
+
+  return result;
 }
 
 async function sendTextMessage(botToken: string, chatId: string | number, text: string) {
@@ -305,8 +319,9 @@ function parseDuration(s: string): number | null {
 
 function parseDelay(delay: string): number {
   const map: Record<string, number> = {
-    "1m": 60000, "5m": 300000, "15m": 900000,
-    "1h": 3600000, "6h": 21600000, "24h": 86400000,
+    "1m": 60000, "5m": 300000, "15m": 900000, "30m": 1800000,
+    "1h": 3600000, "2h": 7200000, "3h": 10800000, "4h": 14400000,
+    "6h": 21600000, "12h": 43200000, "24h": 86400000,
   };
   return map[delay] || 300000;
 }
@@ -334,6 +349,27 @@ async function handleAutoDelete(botToken: string, systemId: string, chatId: numb
   } catch (err) {
     console.error("handleAutoDelete error:", err);
   }
+}
+
+// Queue a message sent BY the bot for auto-deletion
+async function queueBotMessageForDeletion(botToken: string, chatId: string | number, messageId: number) {
+  // Find system by bot token to get rules
+  const system = await getSystemByToken(botToken);
+  if (!system) return;
+
+  const chatIdNum = typeof chatId === "string" ? parseInt(chatId) : chatId;
+  const rules = await getAutoDeleteRules(system.id, chatIdNum);
+  if (rules.length === 0) return;
+
+  const delay = parseDelay(rules[0].delay);
+  const deleteAt = new Date(Date.now() + delay).toISOString();
+
+  await supabase.from("pending_deletions").insert({
+    bot_token: botToken,
+    chat_id: chatId.toString(),
+    message_id: messageId,
+    delete_at: deleteAt,
+  });
 }
 
 // ─── Command: /start ───
