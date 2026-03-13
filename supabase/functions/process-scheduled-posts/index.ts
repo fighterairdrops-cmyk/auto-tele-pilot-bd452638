@@ -213,11 +213,30 @@ serve(async (req) => {
         }
       }
 
+      // Load enabled auto-delete rules once per post run
+      const { data: autoDeleteRules } = await supabase
+        .from("auto_delete_rules")
+        .select("chat_id, delay")
+        .eq("system_id", post.system_id)
+        .eq("enabled", true);
+      const rules = autoDeleteRules || [];
+
       // Send to channels
       let success = 0;
       for (const ch of channels) {
-        const ok = await sendToChannel(botToken, `@${ch}`, post.message_text, post.media_file_id, post.media_type);
-        if (ok) success++;
+        const channelChatId = ch.startsWith("@") ? ch : `@${ch}`;
+        const sendResult = await sendToChannel(botToken, channelChatId, post.message_text, post.media_file_id, post.media_type);
+
+        if (!sendResult.ok) continue;
+
+        success++;
+
+        if (sendResult.messageId) {
+          const delayMs = resolveAutoDeleteDelay(rules, channelChatId);
+          if (delayMs) {
+            await queuePendingDeletion(botToken, channelChatId, sendResult.messageId, delayMs);
+          }
+        }
       }
 
       const newTimesSent = post.times_sent + 1;
