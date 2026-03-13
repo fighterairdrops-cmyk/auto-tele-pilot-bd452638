@@ -14,13 +14,15 @@ const supabase = createClient(
 // ─── Telegram helpers ───
 
 async function sendTelegramMessage(botToken: string, chatId: string | number, text: string, mediaFileId?: string | null, mediaType?: string | null) {
+  let result: any;
   try {
     // If there's media, send it with caption
     if (mediaFileId && mediaType) {
-      return await sendMedia(botToken, chatId, mediaFileId, mediaType, text);
+      result = await sendMedia(botToken, chatId, mediaFileId, mediaType, text);
+    } else {
+      // Text-only message
+      result = await sendTextMessage(botToken, chatId, text);
     }
-    // Text-only message
-    return await sendTextMessage(botToken, chatId, text);
   } catch (err) {
     console.error("sendTelegramMessage error:", err);
     // Ultimate fallback: plain text no formatting
@@ -31,12 +33,24 @@ async function sendTelegramMessage(botToken: string, chatId: string | number, te
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ chat_id: chatId, text: plain }),
       });
-      return await res.json();
+      result = await res.json();
     } catch (e2) {
       console.error("Final fallback also failed:", e2);
       return { ok: false };
     }
   }
+
+  // Queue bot's own sent message for auto-deletion if rules exist
+  if (result?.ok && result?.result?.message_id) {
+    try {
+      await queueBotMessageForDeletion(botToken, chatId, result.result.message_id);
+    } catch (e) {
+      // Don't fail the send if auto-delete queueing fails
+      console.error("Failed to queue bot message for deletion:", e);
+    }
+  }
+
+  return result;
 }
 
 async function sendTextMessage(botToken: string, chatId: string | number, text: string) {
