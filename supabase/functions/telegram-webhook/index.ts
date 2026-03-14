@@ -227,11 +227,86 @@ function resolveAutoDeleteDelay(rules: Array<{ chat_id: string; delay: string }>
 // Simple, safe approach: sort entities, apply non-overlapping ones, skip conflicts.
 
 function entitiesToHtml(text: string, entities: any[] | undefined): string {
-...
+  if (!entities || entities.length === 0) return escapeHtml(text);
+
+  try {
+    // Telegram uses UTF-16 offsets. Convert text to UTF-16 code units for correct indexing.
+    // Build a mapping from UTF-16 offset to code point index.
+    const codePoints = [...text];
+    const utf16ToCp: number[] = []; // utf16ToCp[utf16offset] = codepoint index
+    let utf16Pos = 0;
+    for (let i = 0; i < codePoints.length; i++) {
+      const cp = codePoints[i].codePointAt(0)!;
+      utf16ToCp[utf16Pos] = i;
+      utf16Pos++;
+      if (cp > 0xFFFF) {
+        // Surrogate pair: takes 2 UTF-16 units
+        utf16ToCp[utf16Pos] = i;
+        utf16Pos++;
+      }
+    }
+    // Map the "end" position (one past last char)
+    utf16ToCp[utf16Pos] = codePoints.length;
+
+    const totalUtf16 = utf16Pos;
+
+    // Convert entity offsets from UTF-16 to code point indices
+    const sorted = [...entities].sort((a, b) => a.offset - b.offset || b.length - a.length);
+
+    const inserts: { pos: number; order: number; tag: string }[] = [];
+    let entityIdx = 0;
+
+    for (const e of sorted) {
+      const tag = getTag(e);
+      if (!tag) continue;
+      const startUtf16 = e.offset;
+      const endUtf16 = Math.min(e.offset + e.length, totalUtf16);
+      const start = utf16ToCp[startUtf16] ?? codePoints.length;
+      const end = utf16ToCp[endUtf16] ?? codePoints.length;
+      inserts.push({ pos: start, order: entityIdx, tag: tag.open });
+      inserts.push({ pos: end, order: -entityIdx, tag: tag.close });
+      entityIdx++;
+    }
+
+    inserts.sort((a, b) => {
+      if (a.pos !== b.pos) return a.pos - b.pos;
+      return a.order - b.order;
+    });
+
+    let result = '';
+    let insertIdx = 0;
+
+    for (let i = 0; i <= codePoints.length; i++) {
+      while (insertIdx < inserts.length && inserts[insertIdx].pos === i) {
+        result += inserts[insertIdx].tag;
+        insertIdx++;
+      }
+      if (i < codePoints.length) {
+        result += escapeHtml(codePoints[i]);
+      }
+    }
+
+    return result;
+  } catch (err) {
+    console.error("entitiesToHtml error, falling back to plain:", err);
+    return escapeHtml(text);
+  }
 }
 
 function getTag(e: any): { open: string; close: string } | null {
-...
+  switch (e.type) {
+    case 'bold':            return { open: '<b>', close: '</b>' };
+    case 'italic':          return { open: '<i>', close: '</i>' };
+    case 'underline':       return { open: '<u>', close: '</u>' };
+    case 'strikethrough':   return { open: '<s>', close: '</s>' };
+    case 'spoiler':         return { open: '<tg-spoiler>', close: '</tg-spoiler>' };
+    case 'code':            return { open: '<code>', close: '</code>' };
+    case 'pre':             return { open: e.language ? `<pre><code class="language-${escapeHtml(e.language)}">` : '<pre>', close: e.language ? '</code></pre>' : '</pre>' };
+    case 'text_link':       return { open: `<a href="${escapeHtml(e.url || '')}">`, close: '</a>' };
+    case 'text_mention':    return { open: `<a href="tg://user?id=${e.user?.id || ''}">`, close: '</a>' };
+    case 'blockquote':      return { open: '<blockquote>', close: '</blockquote>' };
+    default: return null;
+  }
 }
 
 function escapeHtml(s: string): string {
@@ -241,13 +316,30 @@ function escapeHtml(s: string): string {
 // ─── Media extractor ───
 
 function extractMedia(msg: any): { fileId: string; type: string } | null {
-...
+  if (msg.photo && msg.photo.length > 0) {
+    return { fileId: msg.photo[msg.photo.length - 1].file_id, type: "photo" };
+  }
+  if (msg.video) return { fileId: msg.video.file_id, type: "video" };
+  if (msg.document) return { fileId: msg.document.file_id, type: "document" };
+  if (msg.audio) return { fileId: msg.audio.file_id, type: "audio" };
+  if (msg.voice) return { fileId: msg.voice.file_id, type: "voice" };
+  if (msg.video_note) return { fileId: msg.video_note.file_id, type: "video_note" };
+  if (msg.animation) return { fileId: msg.animation.file_id, type: "animation" };
+  if (msg.sticker) return { fileId: msg.sticker.file_id, type: "sticker" };
+  return null;
 }
 
 // ─── Duration parser ───
 
 function parseDuration(s: string): number | null {
-...
+  const match = s.match(/^(\d+)(m|h|d)$/);
+  if (!match) return null;
+  const n = parseInt(match[1]);
+  const unit = match[2];
+  if (unit === "m") return n * 60;
+  if (unit === "h") return n * 3600;
+  if (unit === "d") return n * 86400;
+  return null;
 }
 
 function parseDelay(delay: string): number {
