@@ -715,8 +715,9 @@ const Systems = ({ session }: { session: Session | null }) => {
                     <div className="p-3 rounded-md bg-muted/50 border border-border space-y-3">
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1">
-                          <Label className="text-xs text-muted-foreground">Chat ID</Label>
-                          <Input placeholder="-1001234567890" value={newRuleChatId} onChange={(e) => setNewRuleChatId(e.target.value)} className="text-sm h-8 font-mono" />
+                          <Label className="text-xs text-muted-foreground">Chat ID or *</Label>
+                          <Input placeholder="-1001234567890 or *" value={newRuleChatId} onChange={(e) => setNewRuleChatId(e.target.value)} className="text-sm h-8 font-mono" />
+                          <p className="text-[10px] text-muted-foreground">Use <span className="font-mono">*</span> to apply to all channels/groups this system posts in.</p>
                         </div>
                         <div className="space-y-1">
                           <Label className="text-xs text-muted-foreground">Delete after</Label>
