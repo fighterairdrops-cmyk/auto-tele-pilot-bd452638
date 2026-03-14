@@ -187,14 +187,40 @@ async function getUserChannelAccess(systemId: string, userId: number): Promise<s
   return data ? data.map((c: any) => c.channel_username) : [];
 }
 
-async function getAutoDeleteRules(systemId: string, chatId: number) {
+async function getEnabledAutoDeleteRules(systemId: string) {
   const { data } = await supabase
     .from("auto_delete_rules")
-    .select("*")
+    .select("chat_id, delay")
     .eq("system_id", systemId)
-    .eq("chat_id", chatId.toString())
     .eq("enabled", true);
   return data || [];
+}
+
+function normalizeChatKey(chatId: string): string {
+  const trimmed = chatId.trim();
+  return trimmed.startsWith("@") ? trimmed.slice(1).toLowerCase() : trimmed.toLowerCase();
+}
+
+function resolveAutoDeleteDelay(rules: Array<{ chat_id: string; delay: string }>, chatId: string): number | null {
+  if (!rules || rules.length === 0) return null;
+
+  const normalizedTarget = normalizeChatKey(chatId);
+
+  const exact = rules.find((rule) => normalizeChatKey(rule.chat_id) === normalizedTarget);
+  if (exact) return parseDelay(exact.delay);
+
+  const wildcard = rules.find((rule) => {
+    const key = normalizeChatKey(rule.chat_id);
+    return key === "*" || key === "all";
+  });
+  if (wildcard) return parseDelay(wildcard.delay);
+
+  // If only one rule exists, treat it as default for all messages sent by this system.
+  if (rules.length === 1) {
+    return parseDelay(rules[0].delay);
+  }
+
+  return null;
 }
 
 // ─── Telegram entities → HTML converter ───
@@ -291,7 +317,6 @@ function escapeHtml(s: string): string {
 
 function extractMedia(msg: any): { fileId: string; type: string } | null {
   if (msg.photo && msg.photo.length > 0) {
-    // Get largest photo
     return { fileId: msg.photo[msg.photo.length - 1].file_id, type: "photo" };
   }
   if (msg.video) return { fileId: msg.video.file_id, type: "video" };
@@ -326,26 +351,30 @@ function parseDelay(delay: string): number {
   return map[delay] || 300000;
 }
 
+async function queueDeletion(botToken: string, chatId: string, messageId: number, delayMs: number) {
+  const deleteAt = new Date(Date.now() + delayMs).toISOString();
+
+  const { error } = await supabase.from("pending_deletions").insert({
+    bot_token: botToken,
+    chat_id: chatId,
+    message_id: messageId,
+    delete_at: deleteAt,
+  });
+
+  if (error) {
+    console.error("Failed to queue auto-delete:", error);
+  }
+}
+
 // ─── Auto-delete ───
 
 async function handleAutoDelete(botToken: string, systemId: string, chatId: number, messageId: number) {
   try {
-    const rules = await getAutoDeleteRules(systemId, chatId);
-    if (rules.length === 0) return;
+    const rules = await getEnabledAutoDeleteRules(systemId);
+    const delayMs = resolveAutoDeleteDelay(rules, chatId.toString());
+    if (!delayMs) return;
 
-    const delay = parseDelay(rules[0].delay);
-    const deleteAt = new Date(Date.now() + delay).toISOString();
-
-    const { error } = await supabase.from("pending_deletions").insert({
-      bot_token: botToken,
-      chat_id: chatId.toString(),
-      message_id: messageId,
-      delete_at: deleteAt,
-    });
-
-    if (error) {
-      console.error("Failed to queue auto-delete:", error);
-    }
+    await queueDeletion(botToken, chatId.toString(), messageId, delayMs);
   } catch (err) {
     console.error("handleAutoDelete error:", err);
   }
@@ -353,23 +382,15 @@ async function handleAutoDelete(botToken: string, systemId: string, chatId: numb
 
 // Queue a message sent BY the bot for auto-deletion
 async function queueBotMessageForDeletion(botToken: string, chatId: string | number, messageId: number) {
-  // Find system by bot token to get rules
   const system = await getSystemByToken(botToken);
   if (!system) return;
 
-  const chatIdNum = typeof chatId === "string" ? parseInt(chatId) : chatId;
-  const rules = await getAutoDeleteRules(system.id, chatIdNum);
-  if (rules.length === 0) return;
+  const rules = await getEnabledAutoDeleteRules(system.id);
+  const normalizedChatId = chatId.toString();
+  const delayMs = resolveAutoDeleteDelay(rules, normalizedChatId);
+  if (!delayMs) return;
 
-  const delay = parseDelay(rules[0].delay);
-  const deleteAt = new Date(Date.now() + delay).toISOString();
-
-  await supabase.from("pending_deletions").insert({
-    bot_token: botToken,
-    chat_id: chatId.toString(),
-    message_id: messageId,
-    delete_at: deleteAt,
-  });
+  await queueDeletion(botToken, normalizedChatId, messageId, delayMs);
 }
 
 // ─── Command: /start ───
@@ -827,6 +848,12 @@ serve(async (req) => {
     const messageId = message.message_id;
     const replyToMessage = message.reply_to_message;
 
+    if (!userId) {
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Auto-delete check
     await handleAutoDelete(botToken, system.id, chatId, messageId);
 
@@ -853,13 +880,29 @@ serve(async (req) => {
       const chatAllowed = await isChatAllowed(system.id, chatId);
       console.log(`Access check: user=${userId}, userAllowed=${userAllowed}, chatAllowed=${chatAllowed}, system=${system.id}`);
       if (!userAllowed && !chatAllowed) {
-        if (text.startsWith("/")) {
-          await sendTelegramMessage(botToken, chatId, "❌ You are not authorized to use this bot. Ask an admin to add you.");
-        }
+        await sendTelegramMessage(botToken, chatId, "❌ You are not authorized to use this bot. Ask a main admin to add you.");
         return new Response(JSON.stringify({ ok: true }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+    }
+
+    const admin = await isAdmin(system.id, userId);
+    const adminCommands = new Set(["/access", "/remove", "/revoke", "/addadmin", "/removeadmin", "/allposts", "/stopall", "/channels", "/myaccess"]);
+    const userAllowedCommands = new Set(["/start", "/help", "/id", "/post", "/stop", "/myposts"]);
+
+    if (!admin && adminCommands.has(command)) {
+      await sendTelegramMessage(botToken, chatId, "❌ Only main admins can use this command.");
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (!admin && !userAllowedCommands.has(command)) {
+      await sendTelegramMessage(botToken, chatId, "❌ You can use only /post, /stop and your own post commands.");
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     console.log(`Command: ${command} from user ${userId} in chat ${chatId}`);
