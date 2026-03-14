@@ -253,14 +253,17 @@ serve(async (req) => {
         })
         .eq("id", post.id);
 
-      // Notify user
+      // Notify user and queue auto-delete for the notification too
       if (success > 0) {
         const notifyText = `📤 Post ${newTimesSent}/${post.total_times} sent to ${success} channel(s).${isComplete ? " ✅ Complete!" : ""}`;
-        await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chat_id: post.chat_id, text: notifyText }),
-        });
+        const notifyResult = await sendText(botToken, post.chat_id, notifyText);
+
+        if (notifyResult.ok && notifyResult.messageId) {
+          const delayMs = resolveAutoDeleteDelay(rules, post.chat_id);
+          if (delayMs) {
+            await queuePendingDeletion(botToken, post.chat_id, notifyResult.messageId, delayMs);
+          }
+        }
       }
 
       processed++;
