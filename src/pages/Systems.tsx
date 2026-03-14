@@ -442,7 +442,7 @@ const Systems = ({ session }: { session: Session | null }) => {
         {header}
         <div className="max-w-3xl mx-auto p-5 space-y-5">
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setView("list"); setManagingSystem(null); setAddingUser(false); setAddingGroup(false); setAddingTask(false); setAddingRule(false); setAddingChannel(false); }}>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setView("list"); setManagingSystem(null); setAddingUser(false); setAddingGroup(false); setAddingTask(false); setAddingRule(false); setAddingChannel(false); setNewUserIsMainAdmin(false); setCopyTargetSystemId(""); }}>
               <ArrowLeft className="w-4 h-4" />
             </Button>
             <div className="flex items-center gap-2.5">
