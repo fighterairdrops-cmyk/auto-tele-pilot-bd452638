@@ -4,7 +4,7 @@ import type { Session } from "@supabase/supabase-js";
 import {
   Bot, User, Plus, Shield, Clock, Trash2, MessageSquare, BarChart3,
   ArrowLeft, Upload, FileText, RefreshCw, Unlink, X,
-  Loader2, Settings, ChevronRight, Sun, Moon, Hash, LogOut,
+  Loader2, Settings, ChevronRight, Sun, Moon, Hash, LogOut, Copy,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,7 +29,7 @@ interface ConnectedSystem {
   lastChecked: string;
 }
 
-interface AllowedUser { id: string; telegram_user_id: string; }
+interface AllowedUser { id: string; telegram_user_id: string; is_admin: boolean; }
 interface AllowedGroup { id: string; telegram_chat_id: string; }
 interface Channel { id: string; username: string; }
 interface ScheduledTask { id: string; chat_id: string; message: string; scheduled_time: string; repeat_interval: string; enabled: boolean; }
@@ -60,6 +60,7 @@ const Systems = ({ session }: { session: Session | null }) => {
   const [addingUser, setAddingUser] = useState(false);
   const [addingGroup, setAddingGroup] = useState(false);
   const [newUserId, setNewUserId] = useState("");
+  const [newUserIsMainAdmin, setNewUserIsMainAdmin] = useState(false);
   const [newGroupId, setNewGroupId] = useState("");
 
   // Channels
@@ -80,6 +81,10 @@ const Systems = ({ session }: { session: Session | null }) => {
   const [addingRule, setAddingRule] = useState(false);
   const [newRuleChatId, setNewRuleChatId] = useState("");
   const [newRuleDelay, setNewRuleDelay] = useState("5m");
+
+  // Copy settings
+  const [copyTargetSystemId, setCopyTargetSystemId] = useState("");
+  const [copyingSettings, setCopyingSettings] = useState(false);
 
   // Load systems from DB
   useEffect(() => {
