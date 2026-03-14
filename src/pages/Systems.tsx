@@ -107,7 +107,7 @@ const Systems = ({ session }: { session: Session | null }) => {
 
   const loadSystemData = useCallback(async (id: string) => {
     const [u, g, c, t, r] = await Promise.all([
-      supabase.from("allowed_users").select("id, telegram_user_id").eq("system_id", id),
+      supabase.from("allowed_users").select("id, telegram_user_id, is_admin").eq("system_id", id),
       supabase.from("allowed_groups").select("id, telegram_chat_id").eq("system_id", id),
       supabase.from("channels").select("id, username").eq("system_id", id),
       supabase.from("scheduled_tasks").select("id, chat_id, message, scheduled_time, repeat_interval, enabled").eq("system_id", id),
@@ -146,7 +146,6 @@ const Systems = ({ session }: { session: Session | null }) => {
       }).select().single();
       if (error) { toast.error("DB error."); return; }
 
-      // Set Telegram webhook
       const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/telegram-webhook/${botToken}`;
       const whRes = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook`, {
         method: "POST",
@@ -164,20 +163,30 @@ const Systems = ({ session }: { session: Session | null }) => {
       toast.success(`Connected: @${bot.username}`);
       setBotToken("");
       setView("list");
-    } catch { toast.error("Network error."); } finally { setCheckingBot(false); }
+    } catch {
+      toast.error("Network error.");
+    } finally {
+      setCheckingBot(false);
+    }
   };
 
   const connectAccount = async () => {
     if (!apiId.trim() || !apiHash.trim()) { toast.error("API ID and Hash required."); return; }
     if (!stringSession.trim() && !sessionFile) { toast.error("Provide session string or file."); return; }
+
     const label = sessionFile ? sessionFile.name : `Account_${apiId}`;
     const { data: inserted, error } = await supabase.from("systems").insert({
       type: "account", label, status: "online", api_id: apiId, api_hash: apiHash, string_session: stringSession || null, user_id: userId,
     }).select().single();
+
     if (error) { toast.error("DB error."); return; }
+
     setSystems((prev) => [...prev, { id: inserted.id, type: "account", label, status: "online", lastChecked: now() }]);
-    toast.success("Account connected!");
-    setApiId(""); setApiHash(""); setStringSession(""); setSessionFile(null);
+    toast.success("Account connected! (Use bot systems for command/webhook mode)");
+    setApiId("");
+    setApiHash("");
+    setStringSession("");
+    setSessionFile(null);
     setView("list");
   };
 
@@ -191,7 +200,10 @@ const Systems = ({ session }: { session: Session | null }) => {
   const removeSystem = async (id: string) => {
     await supabase.from("systems").delete().eq("id", id);
     setSystems((prev) => prev.filter((s) => s.id !== id));
-    if (managingSystem?.id === id) { setManagingSystem(null); setView("list"); }
+    if (managingSystem?.id === id) {
+      setManagingSystem(null);
+      setView("list");
+    }
     toast.success("Removed.");
   };
 
@@ -203,11 +215,35 @@ const Systems = ({ session }: { session: Session | null }) => {
   // ─── CRUD helpers ───
   const addUser = async () => {
     if (!newUserId.trim()) return;
-    const { data, error } = await supabase.from("allowed_users").insert({ system_id: sysId, telegram_user_id: newUserId.trim() }).select().single();
+    const { data, error } = await supabase
+      .from("allowed_users")
+      .insert({ system_id: sysId, telegram_user_id: newUserId.trim(), is_admin: newUserIsMainAdmin })
+      .select("id, telegram_user_id, is_admin")
+      .single();
+
     if (error) { toast.error("Error adding user."); return; }
+
     setAllowedUsers((prev) => [...prev, data]);
-    setNewUserId(""); setAddingUser(false);
-    toast.success("User added.");
+    setNewUserId("");
+    setNewUserIsMainAdmin(false);
+    setAddingUser(false);
+    toast.success(newUserIsMainAdmin ? "Main admin added." : "User added.");
+  };
+
+  const toggleMainAdmin = async (row: AllowedUser) => {
+    const next = !row.is_admin;
+    const { error } = await supabase
+      .from("allowed_users")
+      .update({ is_admin: next })
+      .eq("id", row.id);
+
+    if (error) {
+      toast.error("Failed to update role.");
+      return;
+    }
+
+    setAllowedUsers((prev) => prev.map((u) => (u.id === row.id ? { ...u, is_admin: next } : u)));
+    toast.success(next ? "Main admin enabled." : "Main admin removed.");
   };
 
   const addGroup = async () => {
@@ -215,7 +251,8 @@ const Systems = ({ session }: { session: Session | null }) => {
     const { data, error } = await supabase.from("allowed_groups").insert({ system_id: sysId, telegram_chat_id: newGroupId.trim() }).select().single();
     if (error) { toast.error("Error adding group."); return; }
     setAllowedGroups((prev) => [...prev, data]);
-    setNewGroupId(""); setAddingGroup(false);
+    setNewGroupId("");
+    setAddingGroup(false);
     toast.success("Group added.");
   };
 
@@ -225,7 +262,8 @@ const Systems = ({ session }: { session: Session | null }) => {
     const { data, error } = await supabase.from("channels").insert({ system_id: sysId, username: val }).select().single();
     if (error) { toast.error("Error adding channel."); return; }
     setChannels((prev) => [...prev, data]);
-    setNewChannel(""); setAddingChannel(false);
+    setNewChannel("");
+    setAddingChannel(false);
     toast.success("Channel added.");
   };
 
@@ -237,7 +275,10 @@ const Systems = ({ session }: { session: Session | null }) => {
     }).select().single();
     if (error) { toast.error("Error creating task."); return; }
     setScheduledTasks((prev) => [...prev, data]);
-    setNewTaskChatId(""); setNewTaskMessage(""); setNewTaskTime(""); setNewTaskRepeat("once");
+    setNewTaskChatId("");
+    setNewTaskMessage("");
+    setNewTaskTime("");
+    setNewTaskRepeat("once");
     setAddingTask(false);
     toast.success("Task scheduled.");
   };
@@ -258,11 +299,15 @@ const Systems = ({ session }: { session: Session | null }) => {
   const addAutoDeleteRule = async () => {
     if (!newRuleChatId.trim()) { toast.error("Chat ID required."); return; }
     const { data, error } = await supabase.from("auto_delete_rules").insert({
-      system_id: sysId, chat_id: newRuleChatId.trim(), delay: newRuleDelay,
+      system_id: sysId,
+      chat_id: newRuleChatId.trim(),
+      delay: newRuleDelay,
     }).select().single();
     if (error) { toast.error("Error adding rule."); return; }
     setAutoDeleteRules((prev) => [...prev, data]);
-    setNewRuleChatId(""); setNewRuleDelay("5m"); setAddingRule(false);
+    setNewRuleChatId("");
+    setNewRuleDelay("5m");
+    setAddingRule(false);
     toast.success("Rule added.");
   };
 
@@ -277,6 +322,94 @@ const Systems = ({ session }: { session: Session | null }) => {
     if (!rule) return;
     await supabase.from("auto_delete_rules").update({ enabled: !rule.enabled }).eq("id", ruleId);
     setAutoDeleteRules((prev) => prev.map((r) => r.id === ruleId ? { ...r, enabled: !r.enabled } : r));
+  };
+
+  const copySystemSettings = async () => {
+    if (!sysId || !copyTargetSystemId) {
+      toast.error("Choose a target bot/account first.");
+      return;
+    }
+
+    if (copyTargetSystemId === sysId) {
+      toast.error("Pick a different target system.");
+      return;
+    }
+
+    setCopyingSettings(true);
+
+    try {
+      const [srcUsers, srcGroups, srcChannels, srcRules, srcUserAccess] = await Promise.all([
+        supabase.from("allowed_users").select("telegram_user_id, is_admin").eq("system_id", sysId),
+        supabase.from("allowed_groups").select("telegram_chat_id").eq("system_id", sysId),
+        supabase.from("channels").select("username").eq("system_id", sysId),
+        supabase.from("auto_delete_rules").select("chat_id, delay, enabled").eq("system_id", sysId),
+        supabase.from("user_channel_access").select("telegram_user_id, channel_username, granted_by").eq("system_id", sysId),
+      ]);
+
+      if (srcUsers.error || srcGroups.error || srcChannels.error || srcRules.error || srcUserAccess.error) {
+        throw new Error("Failed loading source settings");
+      }
+
+      await Promise.all([
+        supabase.from("allowed_users").delete().eq("system_id", copyTargetSystemId),
+        supabase.from("allowed_groups").delete().eq("system_id", copyTargetSystemId),
+        supabase.from("channels").delete().eq("system_id", copyTargetSystemId),
+        supabase.from("auto_delete_rules").delete().eq("system_id", copyTargetSystemId),
+        supabase.from("user_channel_access").delete().eq("system_id", copyTargetSystemId),
+      ]);
+
+      const inserts = [
+        srcUsers.data && srcUsers.data.length > 0
+          ? supabase.from("allowed_users").insert(srcUsers.data.map((u) => ({
+              system_id: copyTargetSystemId,
+              telegram_user_id: u.telegram_user_id,
+              is_admin: u.is_admin,
+            })))
+          : Promise.resolve({ error: null }),
+        srcGroups.data && srcGroups.data.length > 0
+          ? supabase.from("allowed_groups").insert(srcGroups.data.map((g) => ({
+              system_id: copyTargetSystemId,
+              telegram_chat_id: g.telegram_chat_id,
+            })))
+          : Promise.resolve({ error: null }),
+        srcChannels.data && srcChannels.data.length > 0
+          ? supabase.from("channels").insert(srcChannels.data.map((c) => ({
+              system_id: copyTargetSystemId,
+              username: c.username,
+            })))
+          : Promise.resolve({ error: null }),
+        srcRules.data && srcRules.data.length > 0
+          ? supabase.from("auto_delete_rules").insert(srcRules.data.map((r) => ({
+              system_id: copyTargetSystemId,
+              chat_id: r.chat_id,
+              delay: r.delay,
+              enabled: r.enabled,
+            })))
+          : Promise.resolve({ error: null }),
+        srcUserAccess.data && srcUserAccess.data.length > 0
+          ? supabase.from("user_channel_access").insert(srcUserAccess.data.map((a) => ({
+              system_id: copyTargetSystemId,
+              telegram_user_id: a.telegram_user_id,
+              channel_username: a.channel_username,
+              granted_by: a.granted_by,
+            })))
+          : Promise.resolve({ error: null }),
+      ];
+
+      const results = await Promise.all(inserts);
+      const failed = results.find((res: any) => res?.error);
+      if (failed) {
+        throw new Error(failed.error?.message || "Copy failed");
+      }
+
+      toast.success("Copied channels, access control, and auto-delete to target system.");
+      setCopyTargetSystemId("");
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to copy settings.");
+    } finally {
+      setCopyingSettings(false);
+    }
   };
 
   const handleLogout = async () => {
