@@ -471,20 +471,33 @@ const Systems = ({ session }: { session: Session | null }) => {
 
             {/* ACCESS CONTROL */}
             <TabsContent value="access" className="mt-5">
-              <GlowCard title="Access Control" subtitle="Manage who can interact with this system">
+              <GlowCard title="Access Control" subtitle="Main admins can use /access /remove /addadmin. Others can use /post and /stop their own posts.">
                 <div className="space-y-4">
                   <div className="p-3 rounded-md bg-muted/50 border border-border">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm text-foreground">Allowed Users</span>
+                      <span className="text-sm text-foreground">Allowed Users + Main Admins</span>
                       <Button size="sm" variant="outline" className="text-xs h-7" onClick={() => setAddingUser(true)}>
                         <Plus className="w-3 h-3 mr-1" /> Add
                       </Button>
                     </div>
                     {addingUser && (
-                      <div className="flex items-center gap-2 mb-2">
-                        <Input placeholder="Telegram User ID (e.g. 123456789)" value={newUserId} onChange={(e) => setNewUserId(e.target.value)} className="text-sm h-8 font-mono" autoFocus onKeyDown={(e) => { if (e.key === "Enter") addUser(); }} />
-                        <Button size="sm" className="h-8 text-xs" onClick={addUser}>Save</Button>
-                        <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => { setAddingUser(false); setNewUserId(""); }}>Cancel</Button>
+                      <div className="space-y-2 mb-2">
+                        <div className="flex items-center gap-2">
+                          <Input
+                            placeholder="Telegram User ID (e.g. 123456789)"
+                            value={newUserId}
+                            onChange={(e) => setNewUserId(e.target.value)}
+                            className="text-sm h-8 font-mono"
+                            autoFocus
+                            onKeyDown={(e) => { if (e.key === "Enter") addUser(); }}
+                          />
+                          <Button size="sm" className="h-8 text-xs" onClick={addUser}>Save</Button>
+                          <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => { setAddingUser(false); setNewUserId(""); setNewUserIsMainAdmin(false); }}>Cancel</Button>
+                        </div>
+                        <div className="flex items-center justify-between rounded border border-border bg-background px-2 py-1.5">
+                          <span className="text-xs text-muted-foreground">Set as Main Admin</span>
+                          <Switch checked={newUserIsMainAdmin} onCheckedChange={setNewUserIsMainAdmin} />
+                        </div>
                       </div>
                     )}
                     {allowedUsers.length === 0 && !addingUser ? (
@@ -494,11 +507,17 @@ const Systems = ({ session }: { session: Session | null }) => {
                         {allowedUsers.map((u) => (
                           <div key={u.id} className="flex items-center justify-between py-1 px-2 rounded bg-background border border-border">
                             <span className="text-xs font-mono text-foreground">{u.telegram_user_id}</span>
-                            <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive" onClick={async () => {
-                              await supabase.from("allowed_users").delete().eq("id", u.id);
-                              setAllowedUsers((prev) => prev.filter((x) => x.id !== u.id));
-                              toast.success("User removed.");
-                            }}><X className="w-3 h-3" /></Button>
+                            <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] text-muted-foreground">Main Admin</span>
+                                <Switch checked={u.is_admin} onCheckedChange={() => toggleMainAdmin(u)} />
+                              </div>
+                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive" onClick={async () => {
+                                await supabase.from("allowed_users").delete().eq("id", u.id);
+                                setAllowedUsers((prev) => prev.filter((x) => x.id !== u.id));
+                                toast.success("User removed.");
+                              }}><X className="w-3 h-3" /></Button>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -534,6 +553,32 @@ const Systems = ({ session }: { session: Session | null }) => {
                         ))}
                       </div>
                     )}
+                  </div>
+
+                  <div className="p-3 rounded-md bg-muted/50 border border-border space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Copy className="w-4 h-4 text-muted-foreground" />
+                      <span className="text-sm text-foreground">Copy channels + access + auto-delete to another system</span>
+                    </div>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <Select value={copyTargetSystemId} onValueChange={setCopyTargetSystemId}>
+                        <SelectTrigger className="h-8 text-sm">
+                          <SelectValue placeholder="Select target bot/account" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {systems
+                            .filter((s) => s.id !== sysId)
+                            .map((s) => (
+                              <SelectItem key={s.id} value={s.id}>
+                                {s.type === "bot" ? "Bot" : "Account"} • {s.label}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                      <Button size="sm" className="h-8 text-xs" onClick={copySystemSettings} disabled={copyingSettings || !copyTargetSystemId}>
+                        {copyingSettings ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Copying...</> : "Copy Settings"}
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </GlowCard>
