@@ -848,6 +848,12 @@ serve(async (req) => {
     const messageId = message.message_id;
     const replyToMessage = message.reply_to_message;
 
+    if (!userId) {
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Auto-delete check
     await handleAutoDelete(botToken, system.id, chatId, messageId);
 
@@ -874,13 +880,29 @@ serve(async (req) => {
       const chatAllowed = await isChatAllowed(system.id, chatId);
       console.log(`Access check: user=${userId}, userAllowed=${userAllowed}, chatAllowed=${chatAllowed}, system=${system.id}`);
       if (!userAllowed && !chatAllowed) {
-        if (text.startsWith("/")) {
-          await sendTelegramMessage(botToken, chatId, "❌ You are not authorized to use this bot. Ask an admin to add you.");
-        }
+        await sendTelegramMessage(botToken, chatId, "❌ You are not authorized to use this bot. Ask a main admin to add you.");
         return new Response(JSON.stringify({ ok: true }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+    }
+
+    const admin = await isAdmin(system.id, userId);
+    const adminCommands = new Set(["/access", "/remove", "/revoke", "/addadmin", "/removeadmin", "/allposts", "/stopall", "/channels", "/myaccess"]);
+    const userAllowedCommands = new Set(["/start", "/help", "/id", "/post", "/stop", "/myposts"]);
+
+    if (!admin && adminCommands.has(command)) {
+      await sendTelegramMessage(botToken, chatId, "❌ Only main admins can use this command.");
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (!admin && !userAllowedCommands.has(command)) {
+      await sendTelegramMessage(botToken, chatId, "❌ You can use only /post, /stop and your own post commands.");
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     console.log(`Command: ${command} from user ${userId} in chat ${chatId}`);
