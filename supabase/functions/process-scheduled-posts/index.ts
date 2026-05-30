@@ -179,19 +179,42 @@ serve(async (req) => {
 
     console.log(`Processing ${posts.length} scheduled posts`);
     let processed = 0;
+    const nowHour = new Date().getUTCHours();
 
     for (const post of posts) {
       const botToken = (post as any).systems?.bot_token;
       if (!botToken) continue;
 
-      // Determine channels to post to
-      let channels: string[];
+      // Time-of-day window check — skip cycle (push next_run_at forward) if outside window
+      const ws = (post as any).window_start_hour;
+      const we = (post as any).window_end_hour;
+      if (ws !== null && ws !== undefined && we !== null && we !== undefined) {
+        const inWindow = ws <= we
+          ? (nowHour >= ws && nowHour < we)
+          : (nowHour >= ws || nowHour < we); // wraps midnight
+        if (!inWindow) {
+          await supabase
+            .from("scheduled_posts")
+            .update({ next_run_at: new Date(Date.now() + 10 * 60 * 1000).toISOString() })
+            .eq("id", post.id);
+          continue;
+        }
+      }
 
-      if (post.target_channels && (post.target_channels as string[]).length > 0) {
-        // Use specific target channels stored with the post
-        channels = post.target_channels as string[];
-      } else {
-        // Fall back to user's accessible channels
+      // Resolve message content — handle rotation if /rpost
+      let messageText: string = post.message_text;
+      let mediaFileId: string | null = post.media_file_id;
+      let mediaType: string | null = post.media_type;
+      const rotation = (post as any).rotation_messages as Array<{ text: string; media_file_id?: string; media_type?: string }> | null;
+      let nextRotationIndex = (post as any).rotation_index ?? 0;
+      if (rotation && rotation.length > 0) {
+        const variant = rotation[nextRotationIndex % rotation.length];
+        messageText = variant.text;
+        mediaFileId = variant.media_file_id || null;
+        mediaType = variant.media_type || null;
+        nextRotationIndex = (nextRotationIndex + 1) % rotation.length;
+      }
+
         const isAdminResult = await supabase
           .from("allowed_users")
           .select("is_admin")
