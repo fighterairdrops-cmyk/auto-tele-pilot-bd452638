@@ -215,14 +215,17 @@ serve(async (req) => {
         nextRotationIndex = (nextRotationIndex + 1) % rotation.length;
       }
 
+      // Determine channels to post to
+      let channels: string[];
+      if (post.target_channels && (post.target_channels as string[]).length > 0) {
+        channels = post.target_channels as string[];
+      } else {
         const isAdminResult = await supabase
           .from("allowed_users")
           .select("is_admin")
           .eq("system_id", post.system_id)
           .eq("telegram_user_id", post.telegram_user_id);
-
         const userIsAdmin = isAdminResult.data?.some((u: any) => u.is_admin);
-
         if (userIsAdmin) {
           const { data } = await supabase.from("channels").select("username").eq("system_id", post.system_id);
           channels = data ? data.map((c: any) => c.username) : [];
@@ -244,16 +247,13 @@ serve(async (req) => {
         .eq("enabled", true);
       const rules = autoDeleteRules || [];
 
-      // Send to channels
+      // Send to channels using resolved (possibly rotated) content
       let success = 0;
       for (const ch of channels) {
         const channelChatId = ch.startsWith("@") ? ch : `@${ch}`;
-        const sendResult = await sendToChannel(botToken, channelChatId, post.message_text, post.media_file_id, post.media_type);
-
+        const sendResult = await sendToChannel(botToken, channelChatId, messageText, mediaFileId, mediaType);
         if (!sendResult.ok) continue;
-
         success++;
-
         if (sendResult.messageId) {
           const delayMs = resolveAutoDeleteDelay(rules, channelChatId);
           if (delayMs) {
@@ -270,6 +270,7 @@ serve(async (req) => {
         .update({
           times_sent: newTimesSent,
           active: !isComplete,
+          rotation_index: nextRotationIndex,
           next_run_at: isComplete
             ? post.next_run_at
             : new Date(Date.now() + post.interval_seconds * 1000).toISOString(),
