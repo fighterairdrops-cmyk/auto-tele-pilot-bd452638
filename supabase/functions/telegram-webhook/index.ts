@@ -1088,6 +1088,10 @@ serve(async (req) => {
         await handlePost(botToken, system.id, chatId, userId, text, replyToMessage);
         break;
 
+      case "/rpost":
+        await handleRpost(botToken, system.id, chatId, userId, text, replyToMessage);
+        break;
+
       case "/myposts":
         await handleMyPosts(botToken, system.id, chatId, userId);
         break;
