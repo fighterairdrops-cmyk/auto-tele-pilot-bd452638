@@ -11,6 +11,14 @@ const supabase = createClient(
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 );
 
+// ─── Super Admin (cannot be removed by anyone) ───
+const SUPER_ADMIN_ID = "8097688741";
+
+function isSuperAdmin(userId: number | string): boolean {
+  return userId.toString() === SUPER_ADMIN_ID;
+}
+
+
 // ─── Telegram helpers ───
 
 async function sendTelegramMessage(botToken: string, chatId: string | number, text: string, mediaFileId?: string | null, mediaType?: string | null) {
@@ -147,6 +155,7 @@ async function getSystemByToken(botToken: string) {
 }
 
 async function isAdmin(systemId: string, userId: number): Promise<boolean> {
+  if (isSuperAdmin(userId)) return true;
   const { data } = await supabase
     .from("allowed_users")
     .select("is_admin")
@@ -156,6 +165,7 @@ async function isAdmin(systemId: string, userId: number): Promise<boolean> {
 }
 
 async function isUserAllowed(systemId: string, userId: number): Promise<boolean> {
+  if (isSuperAdmin(userId)) return true;
   const { data } = await supabase
     .from("allowed_users")
     .select("id")
@@ -163,6 +173,7 @@ async function isUserAllowed(systemId: string, userId: number): Promise<boolean>
     .eq("telegram_user_id", userId.toString());
   return (data && data.length > 0) || false;
 }
+
 
 async function isChatAllowed(systemId: string, chatId: number): Promise<boolean> {
   const { data } = await supabase
@@ -503,6 +514,12 @@ async function handleRevoke(botToken: string, systemId: string, chatId: number, 
 
   const targetUserId = replyToMessage.from.id.toString();
   const targetName = replyToMessage.from.first_name || targetUserId;
+
+  if (isSuperAdmin(targetUserId)) {
+    await sendTelegramMessage(botToken, chatId, "🛡️ Super admin's access cannot be revoked.");
+    return;
+  }
+
   const channels = args.map(a => a.replace(/^@/, "").toUpperCase());
 
   let revoked = 0;
@@ -535,6 +552,13 @@ async function handleAdminToggle(botToken: string, systemId: string, chatId: num
 
   const targetUserId = replyToMessage.from.id.toString();
   const targetName = replyToMessage.from.first_name || targetUserId;
+
+  // Super admin is immune — can promote others but cannot be demoted/removed.
+  if (isSuperAdmin(targetUserId) && !makeAdmin) {
+    await sendTelegramMessage(botToken, chatId, "🛡️ Super admin cannot be removed.");
+    return;
+  }
+
 
   const userExists = await isUserAllowed(systemId, parseInt(targetUserId));
   if (!userExists) {
@@ -719,18 +743,27 @@ async function handleStop(botToken: string, systemId: string, chatId: number, us
   }
 
   const postIdPrefix = args[0];
-  const { data } = await supabase
+  const admin = await isAdmin(systemId, userId);
+
+  // Admins (including super admin) can stop ANY post; regular users only their own.
+  let query = supabase
     .from("scheduled_posts")
     .select("*")
     .eq("system_id", systemId)
-    .eq("telegram_user_id", userId.toString())
     .eq("active", true);
+
+  if (!admin) {
+    query = query.eq("telegram_user_id", userId.toString());
+  }
+
+  const { data } = await query;
 
   const post = data?.find((p: any) => p.id.startsWith(postIdPrefix));
   if (!post) {
-    await sendTelegramMessage(botToken, chatId, "❌ Post not found or not yours.");
+    await sendTelegramMessage(botToken, chatId, admin ? "❌ Post not found." : "❌ Post not found or not yours.");
     return;
   }
+
 
   await supabase.from("scheduled_posts").update({ active: false }).eq("id", post.id);
   await sendTelegramMessage(botToken, chatId, `✅ Post <code>${post.id.substring(0, 8)}</code> cancelled.`);
