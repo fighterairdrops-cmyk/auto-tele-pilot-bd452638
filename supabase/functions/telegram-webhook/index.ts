@@ -1054,7 +1054,7 @@ serve(async (req) => {
 
     const admin = await isAdmin(system.id, userId);
     const adminCommands = new Set(["/access", "/remove", "/revoke", "/addadmin", "/removeadmin", "/allposts", "/stopall", "/channels", "/myaccess"]);
-    const userAllowedCommands = new Set(["/start", "/help", "/id", "/post", "/stop", "/myposts"]);
+    const userAllowedCommands = new Set(["/start", "/help", "/id", "/post", "/rpost", "/stop", "/myposts"]);
 
     if (!admin && adminCommands.has(command)) {
       await sendTelegramMessage(botToken, chatId, "❌ Only main admins can use this command.");
