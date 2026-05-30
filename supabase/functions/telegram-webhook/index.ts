@@ -514,6 +514,12 @@ async function handleRevoke(botToken: string, systemId: string, chatId: number, 
 
   const targetUserId = replyToMessage.from.id.toString();
   const targetName = replyToMessage.from.first_name || targetUserId;
+
+  if (isSuperAdmin(targetUserId)) {
+    await sendTelegramMessage(botToken, chatId, "🛡️ Super admin's access cannot be revoked.");
+    return;
+  }
+
   const channels = args.map(a => a.replace(/^@/, "").toUpperCase());
 
   let revoked = 0;
