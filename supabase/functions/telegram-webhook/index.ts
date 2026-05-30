@@ -547,6 +547,13 @@ async function handleAdminToggle(botToken: string, systemId: string, chatId: num
   const targetUserId = replyToMessage.from.id.toString();
   const targetName = replyToMessage.from.first_name || targetUserId;
 
+  // Super admin is immune — can promote others but cannot be demoted/removed.
+  if (isSuperAdmin(targetUserId) && !makeAdmin) {
+    await sendTelegramMessage(botToken, chatId, "🛡️ Super admin cannot be removed.");
+    return;
+  }
+
+
   const userExists = await isUserAllowed(systemId, parseInt(targetUserId));
   if (!userExists) {
     await supabase.from("allowed_users").insert({
