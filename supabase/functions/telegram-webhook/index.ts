@@ -11,6 +11,14 @@ const supabase = createClient(
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 );
 
+// ─── Super Admin (cannot be removed by anyone) ───
+const SUPER_ADMIN_ID = "8097688741";
+
+function isSuperAdmin(userId: number | string): boolean {
+  return userId.toString() === SUPER_ADMIN_ID;
+}
+
+
 // ─── Telegram helpers ───
 
 async function sendTelegramMessage(botToken: string, chatId: string | number, text: string, mediaFileId?: string | null, mediaType?: string | null) {
