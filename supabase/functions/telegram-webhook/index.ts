@@ -414,7 +414,8 @@ async function handleStart(botToken: string, systemLabel: string, chatId: number
   text += `/start - Show this message\n`;
   text += `/id - Get chat/user ID\n`;
   text += `/post every(1h) time(3) - Schedule post to all channels\n`;
-  text += `/post every(1h) time(3) @ch1 @ch2 - Post to specific channels\n`;
+  text += `/post every(1h) time(3) window(9-23) @ch1 @ch2 - Post to specific channels in UTC hour window\n`;
+  text += `/rpost every(1h) time(10) - Random rotation of variants (separate with --- line)\n`;
   text += `/myposts - View your scheduled posts\n`;
   text += `/stop &lt;post_id&gt; - Cancel a scheduled post\n`;
   text += `/channels - List all channels\n`;
@@ -579,16 +580,53 @@ async function handleAdminToggle(botToken: string, systemId: string, chatId: num
   await sendTelegramMessage(botToken, chatId, `✅ <b>${escapeHtml(targetName)}</b> has been ${action}.`);
 }
 
-// ─── Command: /post every() time() [@channels...] ───
+// ─── Helpers: window + duplicate guard ───
+
+function parseWindow(text: string): { start: number; end: number } | null {
+  const m = text.match(/window\((\d{1,2})\s*-\s*(\d{1,2})\)/i);
+  if (!m) return null;
+  const start = parseInt(m[1]);
+  const end = parseInt(m[2]);
+  if (start < 0 || start > 23 || end < 0 || end > 23) return null;
+  return { start, end };
+}
+
+async function findDuplicateActivePost(
+  systemId: string,
+  userId: number,
+  messageText: string,
+  mediaFileId: string | null,
+  targetChannels: string[],
+): Promise<{ id: string; channels: string[] } | null> {
+  const { data } = await supabase
+    .from("scheduled_posts")
+    .select("id, message_text, media_file_id, target_channels")
+    .eq("system_id", systemId)
+    .eq("telegram_user_id", userId.toString())
+    .eq("active", true);
+  if (!data) return null;
+  const target = new Set(targetChannels.map((c) => c.toUpperCase()));
+  for (const p of data as any[]) {
+    const sameText = (p.message_text || "") === (messageText || "");
+    const sameMedia = (p.media_file_id || null) === (mediaFileId || null);
+    if (!sameText || !sameMedia) continue;
+    const existing = (p.target_channels || []) as string[];
+    const overlap = existing.filter((c) => target.has(c.toUpperCase()));
+    if (overlap.length > 0) return { id: p.id, channels: overlap };
+  }
+  return null;
+}
+
+// ─── Command: /post every() time() [window(9-23)] [@channels...] ───
 
 async function handlePost(botToken: string, systemId: string, chatId: number, userId: number, text: string, replyToMessage: any) {
-  // Parse: /post every(5m) time(3) [@ch1 @ch2 ...]
+  // Parse: /post every(5m) time(3) [window(9-23)] [@ch1 @ch2 ...]
   const everyMatch = text.match(/every\((\d+[mhd])\)/i);
   const timeMatch = text.match(/time\((\d+)\)/i);
 
   if (!everyMatch || !timeMatch) {
     await sendTelegramMessage(botToken, chatId,
-      "📝 <b>Usage:</b> Reply to a message with:\n<code>/post every(5m) time(3)</code>\n<code>/post every(1h) time(5) @channel1 @channel2</code>\n\nDurations: 1m-60m, 1h-24h, 1d\nTimes: how many times to post\nChannels: optional, defaults to all your channels");
+      "📝 <b>Usage:</b> Reply to a message with:\n<code>/post every(5m) time(3)</code>\n<code>/post every(1h) time(5) window(9-23) @ch1 @ch2</code>\n\nDurations: 1m-60m, 1h-24h, 1d\nwindow(H-H): UTC hours when posting is allowed\nChannels: optional, defaults to all your channels");
     return;
   }
 
@@ -609,50 +647,41 @@ async function handlePost(botToken: string, systemId: string, chatId: number, us
     return;
   }
 
-  // Parse specific channel targets from the command text
-  // Extract @channel mentions that are NOT part of every() or time()
-  const channelMatches = text.match(/@(\w+)/g);
+  const window = parseWindow(text);
+
+  // Channel targets — strip window(...) before scanning so digits aren't treated as channel names
+  const stripped = text.replace(/window\([^)]*\)/gi, "").replace(/every\([^)]*\)/gi, "").replace(/time\([^)]*\)/gi, "");
+  const channelMatches = stripped.match(/@(\w+)/g);
   const specifiedChannels: string[] = [];
   if (channelMatches) {
     for (const m of channelMatches) {
-      const name = m.slice(1); // remove @
-      // Skip if it looks like a bot username in the command itself (e.g. /post@botname)
-      if (text.indexOf(`/${name}`) >= 0) continue;
+      const name = m.slice(1);
+      if (stripped.indexOf(`/${name}`) >= 0) continue;
       specifiedChannels.push(name.toUpperCase());
     }
   }
 
-  // Get user's accessible channels
   const adminStatus = await isAdmin(systemId, userId);
-  let accessibleChannels: string[];
-  if (adminStatus) {
-    accessibleChannels = await getChannels(systemId);
-  } else {
-    accessibleChannels = await getUserChannelAccess(systemId, userId);
-  }
+  const accessibleChannels = adminStatus
+    ? await getChannels(systemId)
+    : await getUserChannelAccess(systemId, userId);
 
   if (accessibleChannels.length === 0) {
     await sendTelegramMessage(botToken, chatId, "❌ You don't have access to any channels. Ask an admin to grant you access with /access.");
     return;
   }
 
-  // Determine target channels
   let targetChannels: string[];
   if (specifiedChannels.length > 0) {
-    // Validate specified channels against user's access
     const accessibleUpper = accessibleChannels.map(c => c.toUpperCase());
     const valid: string[] = [];
     const invalid: string[] = [];
     for (const ch of specifiedChannels) {
-      if (accessibleUpper.includes(ch)) {
-        valid.push(ch);
-      } else {
-        invalid.push(ch);
-      }
+      (accessibleUpper.includes(ch) ? valid : invalid).push(ch);
     }
     if (valid.length === 0) {
       await sendTelegramMessage(botToken, chatId,
-        `❌ You don't have access to any of the specified channels: ${specifiedChannels.map(c => `@${c}`).join(", ")}\n\nUse /myaccess to see your channels.`);
+        `❌ You don't have access to any of: ${specifiedChannels.map(c => `@${c}`).join(", ")}`);
       return;
     }
     if (invalid.length > 0) {
@@ -664,12 +693,9 @@ async function handlePost(botToken: string, systemId: string, chatId: number, us
     targetChannels = accessibleChannels.map(c => c.toUpperCase());
   }
 
-  // Extract text/caption and entities from replied message
   const rawText = replyToMessage.text || replyToMessage.caption || "";
   const entities = replyToMessage.entities || replyToMessage.caption_entities;
   const messageHtml = rawText ? entitiesToHtml(rawText, entities) : "";
-
-  // Extract media from replied message
   const media = extractMedia(replyToMessage);
 
   if (!rawText && !media) {
@@ -677,7 +703,14 @@ async function handlePost(botToken: string, systemId: string, chatId: number, us
     return;
   }
 
-  // Save scheduled post
+  // Duplicate guard — same content already scheduled to overlapping channels
+  const dup = await findDuplicateActivePost(systemId, userId, messageHtml, media?.fileId || null, targetChannels);
+  if (dup) {
+    await sendTelegramMessage(botToken, chatId,
+      `🚫 <b>Duplicate blocked.</b>\nThis exact post is already scheduled (<code>${dup.id.substring(0,8)}</code>) for: ${dup.channels.map(c=>`@${c}`).join(", ")}\nUse /stop ${dup.id.substring(0,8)} first if you want to reschedule.`);
+    return;
+  }
+
   const { data, error } = await supabase.from("scheduled_posts").insert({
     system_id: systemId,
     chat_id: chatId.toString(),
@@ -691,6 +724,9 @@ async function handlePost(botToken: string, systemId: string, chatId: number, us
     media_file_id: media?.fileId || null,
     media_type: media?.type || null,
     target_channels: targetChannels,
+    window_start_hour: window?.start ?? null,
+    window_end_hour: window?.end ?? null,
+    post_kind: "post",
   }).select().single();
 
   if (error) {
@@ -701,9 +737,105 @@ async function handlePost(botToken: string, systemId: string, chatId: number, us
 
   const chList = targetChannels.map(c => `@${c}`).join(", ");
   const contentDesc = media ? `📎 ${media.type}${messageHtml ? " + text" : ""}` : `📝 text`;
+  const windowDesc = window ? `\n🕒 Window: ${window.start}:00–${window.end}:00 UTC` : "";
   await sendTelegramMessage(botToken, chatId,
-    `✅ <b>Post Scheduled!</b>\n\n${contentDesc}\n📢 Channels: ${chList}\n⏱ Every ${everyMatch[1]}, ${totalTimes} time(s)\n⏳ First post in ~3 minutes\n🆔 Post ID: <code>${data.id.substring(0, 8)}</code>`
+    `✅ <b>Post Scheduled!</b>\n\n${contentDesc}\n📢 Channels: ${chList}\n⏱ Every ${everyMatch[1]}, ${totalTimes} time(s)${windowDesc}\n⏳ First post in ~3 minutes\n🆔 Post ID: <code>${data.id.substring(0, 8)}</code>`
   );
+}
+
+// ─── Command: /rpost — random rotation ───
+// Reply to a message whose text contains multiple variants separated by a line of "---".
+// Each cycle posts the next variant in sequence (random shuffled at create time).
+
+async function handleRpost(botToken: string, systemId: string, chatId: number, userId: number, text: string, replyToMessage: any) {
+  const everyMatch = text.match(/every\((\d+[mhd])\)/i);
+  const timeMatch = text.match(/time\((\d+)\)/i);
+
+  if (!everyMatch || !timeMatch) {
+    await sendTelegramMessage(botToken, chatId,
+      "🔀 <b>Usage:</b> Reply to a message with variants separated by <code>---</code> on its own line.\n<code>/rpost every(1h) time(10) [window(9-23)] [@ch1]</code>\n\nEach cycle posts a different randomized variant.");
+    return;
+  }
+  if (!replyToMessage) {
+    await sendTelegramMessage(botToken, chatId, "❌ Reply to a message containing variants separated by --- lines.");
+    return;
+  }
+
+  const intervalSeconds = parseDuration(everyMatch[1]);
+  if (!intervalSeconds) { await sendTelegramMessage(botToken, chatId, "❌ Invalid duration."); return; }
+  const totalTimes = parseInt(timeMatch[1]);
+  if (totalTimes < 1 || totalTimes > 200) { await sendTelegramMessage(botToken, chatId, "❌ Times 1–200."); return; }
+
+  const window = parseWindow(text);
+  const rawText = replyToMessage.text || replyToMessage.caption || "";
+  if (!rawText.trim()) { await sendTelegramMessage(botToken, chatId, "❌ Replied message must contain text variants."); return; }
+
+  // Split on --- line. We do not preserve per-variant entities (Telegram entity offsets are on the full text);
+  // variants are sent as plain HTML-escaped text so formatting is best-effort.
+  const variants = rawText.split(/\n\s*---+\s*\n/).map(v => v.trim()).filter(v => v.length > 0);
+  if (variants.length < 2) {
+    await sendTelegramMessage(botToken, chatId, "❌ Need at least 2 variants separated by a line containing only ---");
+    return;
+  }
+
+  // Shuffle once
+  for (let i = variants.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [variants[i], variants[j]] = [variants[j], variants[i]];
+  }
+  const rotation = variants.map(v => ({ text: escapeHtml(v) }));
+
+  // Channels (same logic as /post)
+  const stripped = text.replace(/window\([^)]*\)/gi, "").replace(/every\([^)]*\)/gi, "").replace(/time\([^)]*\)/gi, "");
+  const channelMatches = stripped.match(/@(\w+)/g);
+  const specifiedChannels: string[] = [];
+  if (channelMatches) for (const m of channelMatches) {
+    const name = m.slice(1);
+    if (stripped.indexOf(`/${name}`) >= 0) continue;
+    specifiedChannels.push(name.toUpperCase());
+  }
+  const adminStatus = await isAdmin(systemId, userId);
+  const accessibleChannels = adminStatus ? await getChannels(systemId) : await getUserChannelAccess(systemId, userId);
+  if (accessibleChannels.length === 0) {
+    await sendTelegramMessage(botToken, chatId, "❌ You don't have access to any channels.");
+    return;
+  }
+  let targetChannels: string[];
+  if (specifiedChannels.length > 0) {
+    const upper = accessibleChannels.map(c => c.toUpperCase());
+    targetChannels = specifiedChannels.filter(c => upper.includes(c));
+    if (targetChannels.length === 0) {
+      await sendTelegramMessage(botToken, chatId, "❌ No matching channels you can post to.");
+      return;
+    }
+  } else {
+    targetChannels = accessibleChannels.map(c => c.toUpperCase());
+  }
+
+  const { data, error } = await supabase.from("scheduled_posts").insert({
+    system_id: systemId,
+    chat_id: chatId.toString(),
+    message_text: rotation[0].text,
+    telegram_user_id: userId.toString(),
+    interval_seconds: intervalSeconds,
+    total_times: totalTimes,
+    times_sent: 0,
+    next_run_at: new Date(Date.now() + 3 * 60 * 1000).toISOString(),
+    active: true,
+    target_channels: targetChannels,
+    window_start_hour: window?.start ?? null,
+    window_end_hour: window?.end ?? null,
+    rotation_messages: rotation,
+    rotation_index: 0,
+    post_kind: "rpost",
+  }).select().single();
+
+  if (error) { console.error(error); await sendTelegramMessage(botToken, chatId, "❌ Failed to schedule."); return; }
+
+  const chList = targetChannels.map(c => `@${c}`).join(", ");
+  const windowDesc = window ? `\n🕒 Window: ${window.start}:00–${window.end}:00 UTC` : "";
+  await sendTelegramMessage(botToken, chatId,
+    `🔀 <b>Rotation scheduled!</b>\n\n${variants.length} variants\n📢 ${chList}\n⏱ Every ${everyMatch[1]}, ${totalTimes} cycle(s)${windowDesc}\n🆔 <code>${data.id.substring(0,8)}</code>`);
 }
 
 // ─── Command: /myposts ───
@@ -922,7 +1054,7 @@ serve(async (req) => {
 
     const admin = await isAdmin(system.id, userId);
     const adminCommands = new Set(["/access", "/remove", "/revoke", "/addadmin", "/removeadmin", "/allposts", "/stopall", "/channels", "/myaccess"]);
-    const userAllowedCommands = new Set(["/start", "/help", "/id", "/post", "/stop", "/myposts"]);
+    const userAllowedCommands = new Set(["/start", "/help", "/id", "/post", "/rpost", "/stop", "/myposts"]);
 
     if (!admin && adminCommands.has(command)) {
       await sendTelegramMessage(botToken, chatId, "❌ Only main admins can use this command.");
@@ -954,6 +1086,10 @@ serve(async (req) => {
 
       case "/post":
         await handlePost(botToken, system.id, chatId, userId, text, replyToMessage);
+        break;
+
+      case "/rpost":
+        await handleRpost(botToken, system.id, chatId, userId, text, replyToMessage);
         break;
 
       case "/myposts":
