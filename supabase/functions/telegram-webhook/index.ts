@@ -155,6 +155,7 @@ async function getSystemByToken(botToken: string) {
 }
 
 async function isAdmin(systemId: string, userId: number): Promise<boolean> {
+  if (isSuperAdmin(userId)) return true;
   const { data } = await supabase
     .from("allowed_users")
     .select("is_admin")
@@ -164,6 +165,7 @@ async function isAdmin(systemId: string, userId: number): Promise<boolean> {
 }
 
 async function isUserAllowed(systemId: string, userId: number): Promise<boolean> {
+  if (isSuperAdmin(userId)) return true;
   const { data } = await supabase
     .from("allowed_users")
     .select("id")
@@ -171,6 +173,7 @@ async function isUserAllowed(systemId: string, userId: number): Promise<boolean>
     .eq("telegram_user_id", userId.toString());
   return (data && data.length > 0) || false;
 }
+
 
 async function isChatAllowed(systemId: string, chatId: number): Promise<boolean> {
   const { data } = await supabase
