@@ -743,18 +743,27 @@ async function handleStop(botToken: string, systemId: string, chatId: number, us
   }
 
   const postIdPrefix = args[0];
-  const { data } = await supabase
+  const admin = await isAdmin(systemId, userId);
+
+  // Admins (including super admin) can stop ANY post; regular users only their own.
+  let query = supabase
     .from("scheduled_posts")
     .select("*")
     .eq("system_id", systemId)
-    .eq("telegram_user_id", userId.toString())
     .eq("active", true);
+
+  if (!admin) {
+    query = query.eq("telegram_user_id", userId.toString());
+  }
+
+  const { data } = await query;
 
   const post = data?.find((p: any) => p.id.startsWith(postIdPrefix));
   if (!post) {
-    await sendTelegramMessage(botToken, chatId, "❌ Post not found or not yours.");
+    await sendTelegramMessage(botToken, chatId, admin ? "❌ Post not found." : "❌ Post not found or not yours.");
     return;
   }
+
 
   await supabase.from("scheduled_posts").update({ active: false }).eq("id", post.id);
   await sendTelegramMessage(botToken, chatId, `✅ Post <code>${post.id.substring(0, 8)}</code> cancelled.`);
