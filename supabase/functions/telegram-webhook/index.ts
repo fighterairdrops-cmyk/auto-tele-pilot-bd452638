@@ -414,7 +414,8 @@ async function handleStart(botToken: string, systemLabel: string, chatId: number
   text += `/start - Show this message\n`;
   text += `/id - Get chat/user ID\n`;
   text += `/post every(1h) time(3) - Schedule post to all channels\n`;
-  text += `/post every(1h) time(3) @ch1 @ch2 - Post to specific channels\n`;
+  text += `/post every(1h) time(3) window(9-23) @ch1 @ch2 - Post to specific channels in UTC hour window\n`;
+  text += `/rpost every(1h) time(10) - Random rotation of variants (separate with --- line)\n`;
   text += `/myposts - View your scheduled posts\n`;
   text += `/stop &lt;post_id&gt; - Cancel a scheduled post\n`;
   text += `/channels - List all channels\n`;
