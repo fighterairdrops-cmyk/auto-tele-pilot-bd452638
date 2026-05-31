@@ -634,6 +634,15 @@ const Systems = ({ session }: { session: Session | null }) => {
               </GlowCard>
             </TabsContent>
 
+            {/* COMPOSER */}
+            <TabsContent value="composer" className="mt-5">
+              <GlowCard title="Post Composer" subtitle="Schedule /post or /rpost jobs without using Telegram">
+                {managingSystem && (
+                  <PostComposer systemId={managingSystem.id} channels={channels} />
+                )}
+              </GlowCard>
+            </TabsContent>
+
             {/* SCHEDULER */}
             <TabsContent value="scheduler" className="mt-5">
               <GlowCard title="Scheduler" subtitle="Schedule messages and tasks">
