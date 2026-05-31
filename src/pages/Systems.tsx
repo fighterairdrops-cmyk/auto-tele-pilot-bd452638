@@ -459,6 +459,7 @@ const Systems = ({ session }: { session: Session | null }) => {
               {[
                 { value: "access", icon: Shield, label: "Access Control" },
                 { value: "channels", icon: Hash, label: "Channels" },
+                { value: "composer", icon: Send, label: "Composer" },
                 { value: "scheduler", icon: Clock, label: "Scheduler" },
                 { value: "auto-delete", icon: Trash2, label: "Auto-Delete" },
                 { value: "live-feed", icon: MessageSquare, label: "Live Feed" },
