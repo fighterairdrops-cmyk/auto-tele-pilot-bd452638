@@ -690,6 +690,7 @@ async function handleQuota(botToken: string, systemId: string, chatId: number, u
 // ─── Command: /post every() time() [window(9-23)] [@channels...] ───
 
 async function handlePost(botToken: string, systemId: string, chatId: number, userId: number, text: string, replyToMessage: any) {
+  if (!(await enforceQuota(botToken, systemId, chatId, userId))) return;
   // Parse: /post every(5m) time(3) [window(9-23)] [@ch1 @ch2 ...]
   const everyMatch = text.match(/every\((\d+[mhd])\)/i);
   const timeMatch = text.match(/time\((\d+)\)/i);
