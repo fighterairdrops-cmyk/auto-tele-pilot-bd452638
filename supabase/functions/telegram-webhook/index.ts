@@ -1213,6 +1213,14 @@ serve(async (req) => {
         await handleStopAll(botToken, system.id, chatId, userId);
         break;
 
+      case "/setquota":
+        await handleSetQuota(botToken, system.id, chatId, userId, args);
+        break;
+
+      case "/quota":
+        await handleQuota(botToken, system.id, chatId, userId);
+        break;
+
       default:
         break;
     }
