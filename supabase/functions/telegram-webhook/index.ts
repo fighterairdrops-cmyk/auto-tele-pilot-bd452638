@@ -819,6 +819,7 @@ async function handlePost(botToken: string, systemId: string, chatId: number, us
 // Each cycle posts the next variant in sequence (random shuffled at create time).
 
 async function handleRpost(botToken: string, systemId: string, chatId: number, userId: number, text: string, replyToMessage: any) {
+  if (!(await enforceQuota(botToken, systemId, chatId, userId))) return;
   const everyMatch = text.match(/every\((\d+[mhd])\)/i);
   const timeMatch = text.match(/time\((\d+)\)/i);
 
