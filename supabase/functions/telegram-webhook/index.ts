@@ -617,6 +617,76 @@ async function findDuplicateActivePost(
   return null;
 }
 
+// ─── Daily post quota (per-user, last 24h). Admins bypass. ───
+async function getDailyQuota(systemId: string): Promise<number | null> {
+  const { data } = await supabase.from("systems").select("daily_post_quota").eq("id", systemId).maybeSingle();
+  const q = (data as any)?.daily_post_quota;
+  return typeof q === "number" && q > 0 ? q : null;
+}
+
+async function countUserPostsLast24h(systemId: string, userId: number): Promise<number> {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { count } = await supabase
+    .from("scheduled_posts")
+    .select("id", { count: "exact", head: true })
+    .eq("system_id", systemId)
+    .eq("telegram_user_id", userId.toString())
+    .gte("created_at", since);
+  return count || 0;
+}
+
+async function enforceQuota(botToken: string, systemId: string, chatId: number, userId: number): Promise<boolean> {
+  if (await isAdmin(systemId, userId)) return true;
+  const quota = await getDailyQuota(systemId);
+  if (!quota) return true;
+  const used = await countUserPostsLast24h(systemId, userId);
+  if (used >= quota) {
+    await sendTelegramMessage(botToken, chatId,
+      `🚫 <b>Daily quota reached.</b>\nYou've used <b>${used}/${quota}</b> posts in the last 24h. Try again later or ask an admin to raise your quota.`);
+    return false;
+  }
+  return true;
+}
+
+// ─── /setquota <number|off> (admin) ───
+async function handleSetQuota(botToken: string, systemId: string, chatId: number, userId: number, args: string[]) {
+  if (!(await isAdmin(systemId, userId))) {
+    await sendTelegramMessage(botToken, chatId, "❌ Only admins can set the quota.");
+    return;
+  }
+  if (args.length === 0) {
+    const q = await getDailyQuota(systemId);
+    await sendTelegramMessage(botToken, chatId, `📊 Current daily quota: <b>${q ?? "unlimited"}</b>\nUsage: <code>/setquota 10</code> or <code>/setquota off</code>`);
+    return;
+  }
+  const raw = args[0].toLowerCase();
+  let newVal: number | null;
+  if (raw === "off" || raw === "0" || raw === "none" || raw === "unlimited") {
+    newVal = null;
+  } else {
+    const n = parseInt(raw);
+    if (isNaN(n) || n < 1 || n > 1000) {
+      await sendTelegramMessage(botToken, chatId, "❌ Provide a number 1–1000 or 'off'.");
+      return;
+    }
+    newVal = n;
+  }
+  await supabase.from("systems").update({ daily_post_quota: newVal }).eq("id", systemId);
+  await sendTelegramMessage(botToken, chatId, `✅ Daily quota set to <b>${newVal ?? "unlimited"}</b> (per non-admin user).`);
+}
+
+// ─── /quota (anyone) — show usage ───
+async function handleQuota(botToken: string, systemId: string, chatId: number, userId: number) {
+  const quota = await getDailyQuota(systemId);
+  const used = await countUserPostsLast24h(systemId, userId);
+  const admin = await isAdmin(systemId, userId);
+  if (admin) {
+    await sendTelegramMessage(botToken, chatId, `📊 <b>Quota status</b>\nGlobal limit: <b>${quota ?? "unlimited"}</b>\nYour posts (24h): <b>${used}</b>\n(Admins bypass the quota)`);
+    return;
+  }
+  await sendTelegramMessage(botToken, chatId, `📊 <b>Your quota</b>\nUsed: <b>${used}/${quota ?? "∞"}</b> in the last 24h`);
+}
+
 // ─── Command: /post every() time() [window(9-23)] [@channels...] ───
 
 async function handlePost(botToken: string, systemId: string, chatId: number, userId: number, text: string, replyToMessage: any) {
