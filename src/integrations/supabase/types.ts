@@ -314,6 +314,7 @@ export type Database = {
           api_id: string | null
           bot_token: string | null
           created_at: string
+          daily_post_quota: number | null
           id: string
           label: string
           last_checked: string | null
@@ -328,6 +329,7 @@ export type Database = {
           api_id?: string | null
           bot_token?: string | null
           created_at?: string
+          daily_post_quota?: number | null
           id?: string
           label: string
           last_checked?: string | null
@@ -342,6 +344,7 @@ export type Database = {
           api_id?: string | null
           bot_token?: string | null
           created_at?: string
+          daily_post_quota?: number | null
           id?: string
           label?: string
           last_checked?: string | null
@@ -357,6 +360,7 @@ export type Database = {
         Row: {
           channel_username: string
           created_at: string
+          expires_at: string | null
           granted_by: string | null
           id: string
           system_id: string
@@ -365,6 +369,7 @@ export type Database = {
         Insert: {
           channel_username: string
           created_at?: string
+          expires_at?: string | null
           granted_by?: string | null
           id?: string
           system_id: string
@@ -373,6 +378,7 @@ export type Database = {
         Update: {
           channel_username?: string
           created_at?: string
+          expires_at?: string | null
           granted_by?: string | null
           id?: string
           system_id?: string
