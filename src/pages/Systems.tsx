@@ -4,8 +4,9 @@ import type { Session } from "@supabase/supabase-js";
 import {
   Bot, User, Plus, Shield, Clock, Trash2, MessageSquare, BarChart3,
   ArrowLeft, Upload, FileText, RefreshCw, Unlink, X,
-  Loader2, Settings, ChevronRight, Sun, Moon, Hash, LogOut, Copy,
+  Loader2, Settings, ChevronRight, Sun, Moon, Hash, LogOut, Copy, Send,
 } from "lucide-react";
+import PostComposer from "@/components/PostComposer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -458,6 +459,7 @@ const Systems = ({ session }: { session: Session | null }) => {
               {[
                 { value: "access", icon: Shield, label: "Access Control" },
                 { value: "channels", icon: Hash, label: "Channels" },
+                { value: "composer", icon: Send, label: "Composer" },
                 { value: "scheduler", icon: Clock, label: "Scheduler" },
                 { value: "auto-delete", icon: Trash2, label: "Auto-Delete" },
                 { value: "live-feed", icon: MessageSquare, label: "Live Feed" },
@@ -629,6 +631,15 @@ const Systems = ({ session }: { session: Session | null }) => {
                     </div>
                   )}
                 </div>
+              </GlowCard>
+            </TabsContent>
+
+            {/* COMPOSER */}
+            <TabsContent value="composer" className="mt-5">
+              <GlowCard title="Post Composer" subtitle="Schedule /post or /rpost jobs without using Telegram">
+                {managingSystem && (
+                  <PostComposer systemId={managingSystem.id} channels={channels} />
+                )}
               </GlowCard>
             </TabsContent>
 
