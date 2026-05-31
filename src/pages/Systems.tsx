@@ -4,8 +4,9 @@ import type { Session } from "@supabase/supabase-js";
 import {
   Bot, User, Plus, Shield, Clock, Trash2, MessageSquare, BarChart3,
   ArrowLeft, Upload, FileText, RefreshCw, Unlink, X,
-  Loader2, Settings, ChevronRight, Sun, Moon, Hash, LogOut, Copy,
+  Loader2, Settings, ChevronRight, Sun, Moon, Hash, LogOut, Copy, Send,
 } from "lucide-react";
+import PostComposer from "@/components/PostComposer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
