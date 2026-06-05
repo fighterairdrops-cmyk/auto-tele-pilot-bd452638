@@ -1476,6 +1476,19 @@ serve(async (req) => {
     }
 
     const update = await req.json();
+
+    // ─── Callback queries (inline buttons from /panel) ───
+    if (update.callback_query) {
+      const system = await getSystemByToken(botToken);
+      if (system) {
+        await ensureGlobalAdminRegistered(update.callback_query.from.id, update.callback_query.from.username);
+        await handleCallbackQuery(botToken, system, update.callback_query);
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const message = update.message;
     if (!message) {
       return new Response(JSON.stringify({ ok: true }), {
@@ -1492,12 +1505,14 @@ serve(async (req) => {
 
     const chatId = message.chat.id;
     const userId = message.from?.id;
+    const username = message.from?.username;
     const text = message.text || message.caption || "";
     const messageId = message.message_id;
     const replyToMessage = message.reply_to_message;
 
     if (!userId) {
       return new Response(JSON.stringify({ ok: true }), {
+
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
