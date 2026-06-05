@@ -187,7 +187,7 @@ async function getSystemByToken(botToken: string) {
 }
 
 async function isAdmin(systemId: string, userId: number): Promise<boolean> {
-  if (isSuperAdmin(userId)) return true;
+  if (await isTopAdmin(userId)) return true;
   const { data } = await supabase
     .from("allowed_users")
     .select("is_admin")
@@ -197,7 +197,7 @@ async function isAdmin(systemId: string, userId: number): Promise<boolean> {
 }
 
 async function isUserAllowed(systemId: string, userId: number): Promise<boolean> {
-  if (isSuperAdmin(userId)) return true;
+  if (await isTopAdmin(userId)) return true;
   const { data } = await supabase
     .from("allowed_users")
     .select("id")
