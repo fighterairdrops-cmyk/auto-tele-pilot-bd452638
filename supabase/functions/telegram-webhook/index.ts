@@ -907,19 +907,26 @@ async function handleRpost(botToken: string, systemId: string, chatId: number, u
   }
   const adminStatus = await isAdmin(systemId, userId);
   const accessibleChannels = adminStatus ? await getChannels(systemId) : await getUserChannelAccess(systemId, userId);
-  if (accessibleChannels.length === 0) {
-    await sendTelegramMessage(botToken, chatId, "❌ You don't have access to any channels.");
-    return;
-  }
   let targetChannels: string[];
   if (specifiedChannels.length > 0) {
-    const upper = accessibleChannels.map(c => c.toUpperCase());
-    targetChannels = specifiedChannels.filter(c => upper.includes(c));
-    if (targetChannels.length === 0) {
-      await sendTelegramMessage(botToken, chatId, "❌ No matching channels you can post to.");
-      return;
+    if (adminStatus) {
+      targetChannels = specifiedChannels;
+    } else {
+      const upper = accessibleChannels.map(c => c.toUpperCase());
+      targetChannels = specifiedChannels.filter(c => upper.includes(c));
+      if (targetChannels.length === 0) {
+        await sendTelegramMessage(botToken, chatId, "❌ No matching channels you can post to.");
+        return;
+      }
     }
   } else {
+    if (accessibleChannels.length === 0) {
+      await sendTelegramMessage(botToken, chatId,
+        adminStatus
+          ? "❌ No channels configured. Specify <code>@channel</code> inline."
+          : "❌ You don't have access to any channels.");
+      return;
+    }
     targetChannels = accessibleChannels.map(c => c.toUpperCase());
   }
 
