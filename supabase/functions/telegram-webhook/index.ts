@@ -18,6 +18,38 @@ function isSuperAdmin(userId: number | string): boolean {
   return userId.toString() === SUPER_ADMIN_ID;
 }
 
+// ─── Telegram Admins (cross-bot, stored in global_admins) ───
+async function isGlobalAdminById(userId: number | string): Promise<boolean> {
+  const { data } = await supabase
+    .from("global_admins")
+    .select("id")
+    .eq("telegram_user_id", userId.toString())
+    .maybeSingle();
+  return !!data;
+}
+
+async function ensureGlobalAdminRegistered(userId: number, username?: string) {
+  if (!username) return;
+  const uname = username.toLowerCase();
+  const { data: byName } = await supabase
+    .from("global_admins")
+    .select("id, telegram_user_id")
+    .ilike("telegram_username", uname)
+    .maybeSingle();
+  if (byName && !byName.telegram_user_id) {
+    await supabase
+      .from("global_admins")
+      .update({ telegram_user_id: userId.toString() })
+      .eq("id", byName.id);
+  }
+}
+
+async function isTopAdmin(userId: number | string): Promise<boolean> {
+  if (isSuperAdmin(userId)) return true;
+  return await isGlobalAdminById(userId);
+}
+
+
 
 // ─── Telegram helpers ───
 
