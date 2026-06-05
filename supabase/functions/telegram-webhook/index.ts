@@ -1517,8 +1517,23 @@ serve(async (req) => {
       });
     }
 
+    // Register Telegram Admin user_id by username if matched
+    await ensureGlobalAdminRegistered(userId, username);
+
     // Auto-delete check
     await handleAutoDelete(botToken, system.id, chatId, messageId);
+
+    // Pending /panel input (non-command messages from an admin in a pending step)
+    if (!text.startsWith("/") || text.trim().toLowerCase() === "/cancel") {
+      if (await isAdmin(system.id, userId)) {
+        const consumed = await handlePendingPanelInput(botToken, system, chatId, userId, text);
+        if (consumed) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+    }
 
     if (!text.startsWith("/")) {
       return new Response(JSON.stringify({ ok: true }), {
@@ -1530,7 +1545,8 @@ serve(async (req) => {
     const command = parts[0].split("@")[0].toLowerCase();
     const args = parts.slice(1);
 
-    // Access control
+    // Access control — Top admins (super + Telegram Admins) always bypass
+    const topAdmin = await isTopAdmin(userId);
     const { data: allUsers } = await supabase
       .from("allowed_users")
       .select("id")
@@ -1538,7 +1554,7 @@ serve(async (req) => {
 
     const hasAccessControl = allUsers && allUsers.length > 0;
 
-    if (hasAccessControl) {
+    if (hasAccessControl && !topAdmin) {
       const userAllowed = await isUserAllowed(system.id, userId);
       const chatAllowed = await isChatAllowed(system.id, chatId);
       console.log(`Access check: user=${userId}, userAllowed=${userAllowed}, chatAllowed=${chatAllowed}, system=${system.id}`);
@@ -1551,7 +1567,7 @@ serve(async (req) => {
     }
 
     const admin = await isAdmin(system.id, userId);
-    const adminCommands = new Set(["/access", "/remove", "/revoke", "/addadmin", "/removeadmin", "/allposts", "/stopall", "/channels", "/myaccess", "/setquota"]);
+    const adminCommands = new Set(["/access", "/remove", "/revoke", "/addadmin", "/removeadmin", "/allposts", "/stopall", "/channels", "/myaccess", "/setquota", "/panel"]);
     const userAllowedCommands = new Set(["/start", "/help", "/id", "/post", "/rpost", "/stop", "/myposts", "/quota"]);
 
     if (!admin && adminCommands.has(command)) {
@@ -1575,6 +1591,11 @@ serve(async (req) => {
       case "/help":
         await handleStart(botToken, system.label, chatId, userId, system.id);
         break;
+
+      case "/panel":
+        await handlePanel(botToken, system, chatId, userId);
+        break;
+
 
       case "/id":
         await sendTelegramMessage(botToken, chatId,
