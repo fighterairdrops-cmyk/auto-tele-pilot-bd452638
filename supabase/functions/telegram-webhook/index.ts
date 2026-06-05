@@ -769,30 +769,37 @@ async function handlePost(botToken: string, systemId: string, chatId: number, us
     ? await getChannels(systemId)
     : await getUserChannelAccess(systemId, userId);
 
-  if (accessibleChannels.length === 0) {
-    await sendTelegramMessage(botToken, chatId, "❌ You don't have access to any channels. Ask an admin to grant you access with /access.");
-    return;
-  }
-
   let targetChannels: string[];
   if (specifiedChannels.length > 0) {
-    const accessibleUpper = accessibleChannels.map(c => c.toUpperCase());
-    const valid: string[] = [];
-    const invalid: string[] = [];
-    for (const ch of specifiedChannels) {
-      (accessibleUpper.includes(ch) ? valid : invalid).push(ch);
+    if (adminStatus) {
+      // Admins can post to ANY channel they specify. Bot just needs to be admin there.
+      targetChannels = specifiedChannels;
+    } else {
+      const accessibleUpper = accessibleChannels.map(c => c.toUpperCase());
+      const valid: string[] = [];
+      const invalid: string[] = [];
+      for (const ch of specifiedChannels) {
+        (accessibleUpper.includes(ch) ? valid : invalid).push(ch);
+      }
+      if (valid.length === 0) {
+        await sendTelegramMessage(botToken, chatId,
+          `❌ You don't have access to any of: ${specifiedChannels.map(c => `@${c}`).join(", ")}`);
+        return;
+      }
+      if (invalid.length > 0) {
+        await sendTelegramMessage(botToken, chatId,
+          `⚠️ Skipping channels you don't have access to: ${invalid.map(c => `@${c}`).join(", ")}`);
+      }
+      targetChannels = valid;
     }
-    if (valid.length === 0) {
+  } else {
+    if (accessibleChannels.length === 0) {
       await sendTelegramMessage(botToken, chatId,
-        `❌ You don't have access to any of: ${specifiedChannels.map(c => `@${c}`).join(", ")}`);
+        adminStatus
+          ? "❌ No channels configured. Specify one inline, e.g. <code>/post every(1h) time(3) @yourchannel</code> (the bot must be admin there)."
+          : "❌ You don't have access to any channels. Ask an admin to grant you access with /access.");
       return;
     }
-    if (invalid.length > 0) {
-      await sendTelegramMessage(botToken, chatId,
-        `⚠️ Skipping channels you don't have access to: ${invalid.map(c => `@${c}`).join(", ")}`);
-    }
-    targetChannels = valid;
-  } else {
     targetChannels = accessibleChannels.map(c => c.toUpperCase());
   }
 
