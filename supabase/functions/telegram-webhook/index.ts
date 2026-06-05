@@ -18,6 +18,38 @@ function isSuperAdmin(userId: number | string): boolean {
   return userId.toString() === SUPER_ADMIN_ID;
 }
 
+// ─── Telegram Admins (cross-bot, stored in global_admins) ───
+async function isGlobalAdminById(userId: number | string): Promise<boolean> {
+  const { data } = await supabase
+    .from("global_admins")
+    .select("id")
+    .eq("telegram_user_id", userId.toString())
+    .maybeSingle();
+  return !!data;
+}
+
+async function ensureGlobalAdminRegistered(userId: number, username?: string) {
+  if (!username) return;
+  const uname = username.toLowerCase();
+  const { data: byName } = await supabase
+    .from("global_admins")
+    .select("id, telegram_user_id")
+    .ilike("telegram_username", uname)
+    .maybeSingle();
+  if (byName && !byName.telegram_user_id) {
+    await supabase
+      .from("global_admins")
+      .update({ telegram_user_id: userId.toString() })
+      .eq("id", byName.id);
+  }
+}
+
+async function isTopAdmin(userId: number | string): Promise<boolean> {
+  if (isSuperAdmin(userId)) return true;
+  return await isGlobalAdminById(userId);
+}
+
+
 
 // ─── Telegram helpers ───
 
@@ -155,7 +187,7 @@ async function getSystemByToken(botToken: string) {
 }
 
 async function isAdmin(systemId: string, userId: number): Promise<boolean> {
-  if (isSuperAdmin(userId)) return true;
+  if (await isTopAdmin(userId)) return true;
   const { data } = await supabase
     .from("allowed_users")
     .select("is_admin")
@@ -165,7 +197,7 @@ async function isAdmin(systemId: string, userId: number): Promise<boolean> {
 }
 
 async function isUserAllowed(systemId: string, userId: number): Promise<boolean> {
-  if (isSuperAdmin(userId)) return true;
+  if (await isTopAdmin(userId)) return true;
   const { data } = await supabase
     .from("allowed_users")
     .select("id")
@@ -737,30 +769,37 @@ async function handlePost(botToken: string, systemId: string, chatId: number, us
     ? await getChannels(systemId)
     : await getUserChannelAccess(systemId, userId);
 
-  if (accessibleChannels.length === 0) {
-    await sendTelegramMessage(botToken, chatId, "❌ You don't have access to any channels. Ask an admin to grant you access with /access.");
-    return;
-  }
-
   let targetChannels: string[];
   if (specifiedChannels.length > 0) {
-    const accessibleUpper = accessibleChannels.map(c => c.toUpperCase());
-    const valid: string[] = [];
-    const invalid: string[] = [];
-    for (const ch of specifiedChannels) {
-      (accessibleUpper.includes(ch) ? valid : invalid).push(ch);
+    if (adminStatus) {
+      // Admins can post to ANY channel they specify. Bot just needs to be admin there.
+      targetChannels = specifiedChannels;
+    } else {
+      const accessibleUpper = accessibleChannels.map(c => c.toUpperCase());
+      const valid: string[] = [];
+      const invalid: string[] = [];
+      for (const ch of specifiedChannels) {
+        (accessibleUpper.includes(ch) ? valid : invalid).push(ch);
+      }
+      if (valid.length === 0) {
+        await sendTelegramMessage(botToken, chatId,
+          `❌ You don't have access to any of: ${specifiedChannels.map(c => `@${c}`).join(", ")}`);
+        return;
+      }
+      if (invalid.length > 0) {
+        await sendTelegramMessage(botToken, chatId,
+          `⚠️ Skipping channels you don't have access to: ${invalid.map(c => `@${c}`).join(", ")}`);
+      }
+      targetChannels = valid;
     }
-    if (valid.length === 0) {
+  } else {
+    if (accessibleChannels.length === 0) {
       await sendTelegramMessage(botToken, chatId,
-        `❌ You don't have access to any of: ${specifiedChannels.map(c => `@${c}`).join(", ")}`);
+        adminStatus
+          ? "❌ No channels configured. Specify one inline, e.g. <code>/post every(1h) time(3) @yourchannel</code> (the bot must be admin there)."
+          : "❌ You don't have access to any channels. Ask an admin to grant you access with /access.");
       return;
     }
-    if (invalid.length > 0) {
-      await sendTelegramMessage(botToken, chatId,
-        `⚠️ Skipping channels you don't have access to: ${invalid.map(c => `@${c}`).join(", ")}`);
-    }
-    targetChannels = valid;
-  } else {
     targetChannels = accessibleChannels.map(c => c.toUpperCase());
   }
 
@@ -868,19 +907,26 @@ async function handleRpost(botToken: string, systemId: string, chatId: number, u
   }
   const adminStatus = await isAdmin(systemId, userId);
   const accessibleChannels = adminStatus ? await getChannels(systemId) : await getUserChannelAccess(systemId, userId);
-  if (accessibleChannels.length === 0) {
-    await sendTelegramMessage(botToken, chatId, "❌ You don't have access to any channels.");
-    return;
-  }
   let targetChannels: string[];
   if (specifiedChannels.length > 0) {
-    const upper = accessibleChannels.map(c => c.toUpperCase());
-    targetChannels = specifiedChannels.filter(c => upper.includes(c));
-    if (targetChannels.length === 0) {
-      await sendTelegramMessage(botToken, chatId, "❌ No matching channels you can post to.");
-      return;
+    if (adminStatus) {
+      targetChannels = specifiedChannels;
+    } else {
+      const upper = accessibleChannels.map(c => c.toUpperCase());
+      targetChannels = specifiedChannels.filter(c => upper.includes(c));
+      if (targetChannels.length === 0) {
+        await sendTelegramMessage(botToken, chatId, "❌ No matching channels you can post to.");
+        return;
+      }
     }
   } else {
+    if (accessibleChannels.length === 0) {
+      await sendTelegramMessage(botToken, chatId,
+        adminStatus
+          ? "❌ No channels configured. Specify <code>@channel</code> inline."
+          : "❌ You don't have access to any channels.");
+      return;
+    }
     targetChannels = accessibleChannels.map(c => c.toUpperCase());
   }
 
@@ -1040,7 +1086,372 @@ async function handleStopAll(botToken: string, systemId: string, chatId: number,
   await sendTelegramMessage(botToken, chatId, `✅ Cancelled ${data?.length || 0} scheduled post(s).`);
 }
 
+// ─── /panel — interactive admin panel (Telegram inline keyboard) ───
+
+async function sendInlineMessage(
+  botToken: string,
+  chatId: number | string,
+  text: string,
+  keyboard: any[][],
+  editMessageId?: number
+) {
+  const body: any = {
+    chat_id: chatId,
+    text,
+    parse_mode: "HTML",
+    reply_markup: { inline_keyboard: keyboard },
+  };
+  const method = editMessageId ? "editMessageText" : "sendMessage";
+  if (editMessageId) body.message_id = editMessageId;
+  let res = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  let json = await res.json();
+  if (!json.ok) {
+    // Fallback plain text
+    body.text = text.replace(/<[^>]*>/g, "");
+    delete body.parse_mode;
+    res = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    json = await res.json();
+  }
+  return json;
+}
+
+async function answerCallbackQuery(botToken: string, callbackQueryId: string, text?: string) {
+  await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ callback_query_id: callbackQueryId, text: text || "" }),
+  });
+}
+
+async function setPanelState(systemId: string, userId: number, chatId: number, action: string, payload?: any) {
+  await supabase.from("panel_state").upsert({
+    system_id: systemId,
+    telegram_user_id: userId.toString(),
+    chat_id: chatId.toString(),
+    action,
+    payload: payload || null,
+  }, { onConflict: "system_id,telegram_user_id" });
+}
+
+async function getPanelState(systemId: string, userId: number) {
+  const { data } = await supabase
+    .from("panel_state")
+    .select("*")
+    .eq("system_id", systemId)
+    .eq("telegram_user_id", userId.toString())
+    .maybeSingle();
+  return data;
+}
+
+async function clearPanelState(systemId: string, userId: number) {
+  await supabase.from("panel_state")
+    .delete()
+    .eq("system_id", systemId)
+    .eq("telegram_user_id", userId.toString());
+}
+
+function mainPanelKeyboard(): any[][] {
+  return [
+    [{ text: "📢 Channels", callback_data: "panel:channels" }, { text: "🚫 Auto-Delete", callback_data: "panel:autodelete" }],
+    [{ text: "🔑 Access", callback_data: "panel:access" }, { text: "👥 Admins", callback_data: "panel:admins" }],
+    [{ text: "📊 Quota", callback_data: "panel:quota" }, { text: "📈 Stats", callback_data: "panel:stats" }],
+    [{ text: "❌ Close", callback_data: "panel:close" }],
+  ];
+}
+
+async function renderMainPanel(systemId: string, systemLabel: string): Promise<{ text: string; keyboard: any[][] }> {
+  const [{ count: chCount }, { count: ruleCount }, { count: postCount }, { count: userCount }] = await Promise.all([
+    supabase.from("channels").select("id", { count: "exact", head: true }).eq("system_id", systemId),
+    supabase.from("auto_delete_rules").select("id", { count: "exact", head: true }).eq("system_id", systemId).eq("enabled", true),
+    supabase.from("scheduled_posts").select("id", { count: "exact", head: true }).eq("system_id", systemId).eq("active", true),
+    supabase.from("allowed_users").select("id", { count: "exact", head: true }).eq("system_id", systemId),
+  ]);
+  const text =
+    `🛠 <b>${escapeHtml(systemLabel)} — Admin Panel</b>\n\n` +
+    `📢 Channels: <b>${chCount ?? 0}</b>\n` +
+    `🚫 Auto-delete rules: <b>${ruleCount ?? 0}</b>\n` +
+    `📤 Active scheduled posts: <b>${postCount ?? 0}</b>\n` +
+    `👥 Registered users: <b>${userCount ?? 0}</b>\n\n` +
+    `Pick a section below.`;
+  return { text, keyboard: mainPanelKeyboard() };
+}
+
+async function renderChannelsPanel(systemId: string) {
+  const { data } = await supabase.from("channels").select("id, username").eq("system_id", systemId).order("username");
+  const rows = (data || []) as any[];
+  const text = rows.length
+    ? `📢 <b>Channels (${rows.length})</b>\n\n` + rows.map(c => `• @${escapeHtml(c.username)}`).join("\n") + `\n\n<i>Tap 🗑 to remove. The bot only needs to be admin in the channel — adding here is optional.</i>`
+    : `📢 <b>No channels configured.</b>\n\nThe bot can already post to any channel where it is admin. Add one here only if you want it as a default target.`;
+  const kb: any[][] = rows.slice(0, 10).map(c => [
+    { text: `🗑 @${c.username}`, callback_data: `ch:del:${c.id.slice(0, 8)}` },
+  ]);
+  kb.push([{ text: "➕ Add channel", callback_data: "ch:add" }]);
+  kb.push([{ text: "🔙 Back", callback_data: "panel:main" }, { text: "❌ Close", callback_data: "panel:close" }]);
+  return { text, keyboard: kb };
+}
+
+async function renderAutoDeletePanel(systemId: string) {
+  const { data } = await supabase.from("auto_delete_rules").select("id, chat_id, delay, enabled").eq("system_id", systemId).order("created_at");
+  const rows = (data || []) as any[];
+  const text = rows.length
+    ? `🚫 <b>Auto-Delete Rules</b>\n\n` + rows.map(r => `${r.enabled ? "✅" : "⏸"} <code>${escapeHtml(r.chat_id)}</code> → ${r.delay}`).join("\n")
+    : `🚫 <b>No auto-delete rules.</b>\n\nAdd one to auto-remove messages after a delay.`;
+  const kb: any[][] = rows.slice(0, 10).map(r => [
+    { text: `🗑 ${r.chat_id} (${r.delay})`, callback_data: `ad:del:${r.id.slice(0, 8)}` },
+  ]);
+  kb.push([{ text: "➕ Add rule", callback_data: "ad:add" }]);
+  kb.push([{ text: "🔙 Back", callback_data: "panel:main" }, { text: "❌ Close", callback_data: "panel:close" }]);
+  return { text, keyboard: kb };
+}
+
+async function renderAccessPanel(systemId: string) {
+  const { data } = await supabase.from("user_channel_access")
+    .select("telegram_user_id, channel_username, expires_at")
+    .eq("system_id", systemId)
+    .order("telegram_user_id");
+  const rows = (data || []) as any[];
+  const grouped = new Map<string, string[]>();
+  for (const r of rows) {
+    const arr = grouped.get(r.telegram_user_id) || [];
+    arr.push(`@${r.channel_username}`);
+    grouped.set(r.telegram_user_id, arr);
+  }
+  const lines: string[] = [];
+  for (const [uid, chs] of grouped) lines.push(`👤 <code>${uid}</code> → ${chs.join(", ")}`);
+  const text = lines.length
+    ? `🔑 <b>Channel access (${grouped.size} users)</b>\n\n` + lines.join("\n")
+    : `🔑 <b>No channel access grants yet.</b>\n\nUse <code>/access @ch</code> by replying to a user's message.`;
+  const kb: any[][] = [
+    [{ text: "ℹ️ How to grant", callback_data: "access:help" }],
+    [{ text: "🔙 Back", callback_data: "panel:main" }, { text: "❌ Close", callback_data: "panel:close" }],
+  ];
+  return { text, keyboard: kb };
+}
+
+async function renderAdminsPanel(systemId: string) {
+  const { data: localAdmins } = await supabase
+    .from("allowed_users")
+    .select("telegram_user_id")
+    .eq("system_id", systemId)
+    .eq("is_admin", true);
+  const { data: globals } = await supabase
+    .from("global_admins")
+    .select("telegram_user_id, telegram_username");
+  const localLines = (localAdmins || []).map((u: any) => `• <code>${u.telegram_user_id}</code>`);
+  const globalLines = (globals || []).map((g: any) => `• ${g.telegram_username ? `@${escapeHtml(g.telegram_username)}` : ""}${g.telegram_user_id ? ` <code>${g.telegram_user_id}</code>` : ""}`);
+  const text =
+    `👥 <b>Admins</b>\n\n` +
+    `⭐ <b>Super admin:</b> <code>${SUPER_ADMIN_ID}</code>\n\n` +
+    `🌐 <b>Telegram Admins (all bots):</b>\n${globalLines.join("\n") || "  (none)"}\n\n` +
+    `🤖 <b>Bot admins (this system):</b>\n${localLines.join("\n") || "  (none)"}`;
+  const kb: any[][] = [
+    [{ text: "➕ Add bot admin (ID)", callback_data: "adm:add" }],
+    [{ text: "🌐 Add Telegram Admin (@user)", callback_data: "gadm:add" }],
+    [{ text: "🔙 Back", callback_data: "panel:main" }, { text: "❌ Close", callback_data: "panel:close" }],
+  ];
+  return { text, keyboard: kb };
+}
+
+async function renderQuotaPanel(systemId: string) {
+  const q = await getDailyQuota(systemId);
+  const text = `📊 <b>Daily Post Quota</b>\n\nCurrent: <b>${q ?? "unlimited"}</b> posts / 24h for non-admins.`;
+  const kb: any[][] = [
+    [{ text: "✏️ Set", callback_data: "q:set" }, { text: "♾ Off", callback_data: "q:off" }],
+    [{ text: "🔙 Back", callback_data: "panel:main" }, { text: "❌ Close", callback_data: "panel:close" }],
+  ];
+  return { text, keyboard: kb };
+}
+
+async function renderStatsPanel(systemId: string) {
+  const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+  const [{ count: posts24 }, { count: totalActive }, { count: delPending }] = await Promise.all([
+    supabase.from("scheduled_posts").select("id", { count: "exact", head: true }).eq("system_id", systemId).gte("created_at", since),
+    supabase.from("scheduled_posts").select("id", { count: "exact", head: true }).eq("system_id", systemId).eq("active", true),
+    supabase.from("pending_deletions").select("id", { count: "exact", head: true }),
+  ]);
+  const text =
+    `📈 <b>Stats</b>\n\n` +
+    `New posts (24h): <b>${posts24 ?? 0}</b>\n` +
+    `Active schedules: <b>${totalActive ?? 0}</b>\n` +
+    `Pending deletions (all bots): <b>${delPending ?? 0}</b>`;
+  const kb: any[][] = [
+    [{ text: "🔙 Back", callback_data: "panel:main" }, { text: "❌ Close", callback_data: "panel:close" }],
+  ];
+  return { text, keyboard: kb };
+}
+
+async function handlePanel(botToken: string, system: any, chatId: number, userId: number) {
+  if (!(await isAdmin(system.id, userId))) {
+    await sendTelegramMessage(botToken, chatId, "❌ Only admins can open the panel.");
+    return;
+  }
+  const { text, keyboard } = await renderMainPanel(system.id, system.label);
+  await sendInlineMessage(botToken, chatId, text, keyboard);
+}
+
+async function handleCallbackQuery(botToken: string, system: any, cb: any) {
+  const userId = cb.from.id;
+  const chatId = cb.message.chat.id;
+  const messageId = cb.message.message_id;
+  const data: string = cb.data || "";
+
+  if (!(await isAdmin(system.id, userId))) {
+    await answerCallbackQuery(botToken, cb.id, "Not allowed");
+    return;
+  }
+
+  await answerCallbackQuery(botToken, cb.id);
+
+  const edit = async (text: string, kb: any[][]) => {
+    await sendInlineMessage(botToken, chatId, text, kb, messageId);
+  };
+
+  if (data === "panel:main") {
+    const r = await renderMainPanel(system.id, system.label); return edit(r.text, r.keyboard);
+  }
+  if (data === "panel:channels") { const r = await renderChannelsPanel(system.id); return edit(r.text, r.keyboard); }
+  if (data === "panel:autodelete") { const r = await renderAutoDeletePanel(system.id); return edit(r.text, r.keyboard); }
+  if (data === "panel:access") { const r = await renderAccessPanel(system.id); return edit(r.text, r.keyboard); }
+  if (data === "panel:admins") { const r = await renderAdminsPanel(system.id); return edit(r.text, r.keyboard); }
+  if (data === "panel:quota") { const r = await renderQuotaPanel(system.id); return edit(r.text, r.keyboard); }
+  if (data === "panel:stats") { const r = await renderStatsPanel(system.id); return edit(r.text, r.keyboard); }
+  if (data === "panel:close") {
+    return edit("✅ Panel closed.", [[{ text: "🛠 Open again", callback_data: "panel:main" }]]);
+  }
+
+  if (data === "ch:add") {
+    await setPanelState(system.id, userId, chatId, "add_channel");
+    return edit("➕ Send the channel username (e.g. <code>@mychannel</code>) as your next message.\n\nSend /cancel to abort.", [[{ text: "🔙 Back", callback_data: "panel:channels" }]]);
+  }
+  if (data.startsWith("ch:del:")) {
+    const prefix = data.slice("ch:del:".length);
+    const { data: rows } = await supabase.from("channels").select("id, username").eq("system_id", system.id);
+    const match = (rows || []).find((r: any) => r.id.startsWith(prefix));
+    if (match) await supabase.from("channels").delete().eq("id", match.id);
+    const r = await renderChannelsPanel(system.id); return edit(r.text, r.keyboard);
+  }
+  if (data === "ad:add") {
+    await setPanelState(system.id, userId, chatId, "add_autodelete");
+    return edit("➕ Send the rule as: <code>&lt;chat_id_or_@username&gt; &lt;delay&gt;</code>\nExample: <code>@mychannel 5m</code> or <code>-100123 1h</code>\nValid delays: 1m, 5m, 15m, 30m, 1h, 2h, 3h, 4h, 6h, 12h, 24h.\n\n/cancel to abort.", [[{ text: "🔙 Back", callback_data: "panel:autodelete" }]]);
+  }
+  if (data.startsWith("ad:del:")) {
+    const prefix = data.slice("ad:del:".length);
+    const { data: rows } = await supabase.from("auto_delete_rules").select("id").eq("system_id", system.id);
+    const match = (rows || []).find((r: any) => r.id.startsWith(prefix));
+    if (match) await supabase.from("auto_delete_rules").delete().eq("id", match.id);
+    const r = await renderAutoDeletePanel(system.id); return edit(r.text, r.keyboard);
+  }
+  if (data === "adm:add") {
+    await setPanelState(system.id, userId, chatId, "add_admin");
+    return edit("➕ Send the Telegram user ID of the new bot admin.\n\n/cancel to abort.", [[{ text: "🔙 Back", callback_data: "panel:admins" }]]);
+  }
+  if (data === "gadm:add") {
+    await setPanelState(system.id, userId, chatId, "add_global_admin");
+    return edit("🌐 Send the username (e.g. <code>@username</code>) or numeric ID of the new <b>Telegram Admin</b> (admin on every bot).\n\n/cancel to abort.", [[{ text: "🔙 Back", callback_data: "panel:admins" }]]);
+  }
+  if (data === "access:help") {
+    return edit("🔑 To grant access: reply to a user's message with <code>/access @channel1 @channel2</code>\nTo revoke: reply with <code>/remove @channel</code>", [[{ text: "🔙 Back", callback_data: "panel:access" }]]);
+  }
+  if (data === "q:set") {
+    await setPanelState(system.id, userId, chatId, "set_quota");
+    return edit("✏️ Send the new daily quota number (e.g. <code>5</code>). /cancel to abort.", [[{ text: "🔙 Back", callback_data: "panel:quota" }]]);
+  }
+  if (data === "q:off") {
+    await supabase.from("systems").update({ daily_post_quota: null }).eq("id", system.id);
+    const r = await renderQuotaPanel(system.id); return edit(r.text, r.keyboard);
+  }
+}
+
+async function handlePendingPanelInput(botToken: string, system: any, chatId: number, userId: number, text: string): Promise<boolean> {
+  const state = await getPanelState(system.id, userId);
+  if (!state) return false;
+  if (text.trim().toLowerCase() === "/cancel") {
+    await clearPanelState(system.id, userId);
+    await sendTelegramMessage(botToken, chatId, "✅ Cancelled.");
+    return true;
+  }
+
+  const respond = async (msg: string, openAfter?: () => Promise<{ text: string; keyboard: any[][] }>) => {
+    await clearPanelState(system.id, userId);
+    await sendTelegramMessage(botToken, chatId, msg);
+    if (openAfter) {
+      const r = await openAfter();
+      await sendInlineMessage(botToken, chatId, r.text, r.keyboard);
+    }
+  };
+
+  if (state.action === "add_channel") {
+    const uname = text.trim().replace(/^@/, "").toLowerCase();
+    if (!/^[a-z0-9_]{3,}$/i.test(uname)) {
+      await sendTelegramMessage(botToken, chatId, "❌ Invalid username. Try again or /cancel.");
+      return true;
+    }
+    const { error } = await supabase.from("channels").insert({ system_id: system.id, username: uname });
+    if (error) return respond("❌ Could not add (maybe duplicate).", () => renderChannelsPanel(system.id));
+    return respond(`✅ Channel @${uname} added.`, () => renderChannelsPanel(system.id));
+  }
+
+  if (state.action === "add_autodelete") {
+    const parts = text.trim().split(/\s+/);
+    if (parts.length < 2) {
+      await sendTelegramMessage(botToken, chatId, "❌ Send: <code>chat_id delay</code>. Try again or /cancel.");
+      return true;
+    }
+    const chat = parts[0];
+    const delay = parts[1].toLowerCase();
+    const valid = ["1m","5m","15m","30m","1h","2h","3h","4h","6h","12h","24h"];
+    if (!valid.includes(delay)) {
+      await sendTelegramMessage(botToken, chatId, `❌ Invalid delay. Use one of: ${valid.join(", ")}`);
+      return true;
+    }
+    await supabase.from("auto_delete_rules").insert({ system_id: system.id, chat_id: chat, delay, enabled: true });
+    return respond(`✅ Auto-delete rule added.`, () => renderAutoDeletePanel(system.id));
+  }
+
+  if (state.action === "add_admin") {
+    const id = text.trim();
+    if (!/^\d+$/.test(id)) {
+      await sendTelegramMessage(botToken, chatId, "❌ Send a numeric Telegram user ID. /cancel to abort.");
+      return true;
+    }
+    await supabase.from("allowed_users").upsert(
+      { system_id: system.id, telegram_user_id: id, is_admin: true },
+      { onConflict: "system_id,telegram_user_id" } as any
+    );
+    return respond(`✅ User <code>${id}</code> is now a bot admin.`, () => renderAdminsPanel(system.id));
+  }
+
+  if (state.action === "add_global_admin") {
+    const raw = text.trim();
+    const insertObj: any = {};
+    if (/^\d+$/.test(raw)) insertObj.telegram_user_id = raw;
+    else insertObj.telegram_username = raw.replace(/^@/, "").toLowerCase();
+    const { error } = await supabase.from("global_admins").insert(insertObj);
+    if (error) return respond("❌ Could not add (maybe duplicate).", () => renderAdminsPanel(system.id));
+    return respond(`✅ New Telegram Admin added.`, () => renderAdminsPanel(system.id));
+  }
+
+  if (state.action === "set_quota") {
+    const n = parseInt(text.trim(), 10);
+    if (isNaN(n) || n < 1 || n > 1000) {
+      await sendTelegramMessage(botToken, chatId, "❌ Send a number 1–1000. /cancel to abort.");
+      return true;
+    }
+    await supabase.from("systems").update({ daily_post_quota: n }).eq("id", system.id);
+    return respond(`✅ Daily quota set to ${n}.`, () => renderQuotaPanel(system.id));
+  }
+
+  return false;
+}
+
 // ─── Main handler ───
+
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -1065,6 +1476,19 @@ serve(async (req) => {
     }
 
     const update = await req.json();
+
+    // ─── Callback queries (inline buttons from /panel) ───
+    if (update.callback_query) {
+      const system = await getSystemByToken(botToken);
+      if (system) {
+        await ensureGlobalAdminRegistered(update.callback_query.from.id, update.callback_query.from.username);
+        await handleCallbackQuery(botToken, system, update.callback_query);
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const message = update.message;
     if (!message) {
       return new Response(JSON.stringify({ ok: true }), {
@@ -1081,18 +1505,35 @@ serve(async (req) => {
 
     const chatId = message.chat.id;
     const userId = message.from?.id;
+    const username = message.from?.username;
     const text = message.text || message.caption || "";
     const messageId = message.message_id;
     const replyToMessage = message.reply_to_message;
 
     if (!userId) {
       return new Response(JSON.stringify({ ok: true }), {
+
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
+    // Register Telegram Admin user_id by username if matched
+    await ensureGlobalAdminRegistered(userId, username);
+
     // Auto-delete check
     await handleAutoDelete(botToken, system.id, chatId, messageId);
+
+    // Pending /panel input (non-command messages from an admin in a pending step)
+    if (!text.startsWith("/") || text.trim().toLowerCase() === "/cancel") {
+      if (await isAdmin(system.id, userId)) {
+        const consumed = await handlePendingPanelInput(botToken, system, chatId, userId, text);
+        if (consumed) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+    }
 
     if (!text.startsWith("/")) {
       return new Response(JSON.stringify({ ok: true }), {
@@ -1104,7 +1545,8 @@ serve(async (req) => {
     const command = parts[0].split("@")[0].toLowerCase();
     const args = parts.slice(1);
 
-    // Access control
+    // Access control — Top admins (super + Telegram Admins) always bypass
+    const topAdmin = await isTopAdmin(userId);
     const { data: allUsers } = await supabase
       .from("allowed_users")
       .select("id")
@@ -1112,7 +1554,7 @@ serve(async (req) => {
 
     const hasAccessControl = allUsers && allUsers.length > 0;
 
-    if (hasAccessControl) {
+    if (hasAccessControl && !topAdmin) {
       const userAllowed = await isUserAllowed(system.id, userId);
       const chatAllowed = await isChatAllowed(system.id, chatId);
       console.log(`Access check: user=${userId}, userAllowed=${userAllowed}, chatAllowed=${chatAllowed}, system=${system.id}`);
@@ -1125,7 +1567,7 @@ serve(async (req) => {
     }
 
     const admin = await isAdmin(system.id, userId);
-    const adminCommands = new Set(["/access", "/remove", "/revoke", "/addadmin", "/removeadmin", "/allposts", "/stopall", "/channels", "/myaccess", "/setquota"]);
+    const adminCommands = new Set(["/access", "/remove", "/revoke", "/addadmin", "/removeadmin", "/allposts", "/stopall", "/channels", "/myaccess", "/setquota", "/panel"]);
     const userAllowedCommands = new Set(["/start", "/help", "/id", "/post", "/rpost", "/stop", "/myposts", "/quota"]);
 
     if (!admin && adminCommands.has(command)) {
@@ -1149,6 +1591,11 @@ serve(async (req) => {
       case "/help":
         await handleStart(botToken, system.label, chatId, userId, system.id);
         break;
+
+      case "/panel":
+        await handlePanel(botToken, system, chatId, userId);
+        break;
+
 
       case "/id":
         await sendTelegramMessage(botToken, chatId,

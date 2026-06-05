@@ -139,6 +139,65 @@ export type Database = {
           },
         ]
       }
+      global_admins: {
+        Row: {
+          created_at: string
+          id: string
+          telegram_user_id: string | null
+          telegram_username: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          telegram_user_id?: string | null
+          telegram_username?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          telegram_user_id?: string | null
+          telegram_username?: string | null
+        }
+        Relationships: []
+      }
+      panel_state: {
+        Row: {
+          action: string
+          chat_id: string
+          created_at: string
+          id: string
+          payload: Json | null
+          system_id: string
+          telegram_user_id: string
+        }
+        Insert: {
+          action: string
+          chat_id: string
+          created_at?: string
+          id?: string
+          payload?: Json | null
+          system_id: string
+          telegram_user_id: string
+        }
+        Update: {
+          action?: string
+          chat_id?: string
+          created_at?: string
+          id?: string
+          payload?: Json | null
+          system_id?: string
+          telegram_user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "panel_state_system_id_fkey"
+            columns: ["system_id"]
+            isOneToOne: false
+            referencedRelation: "systems"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       pending_deletions: {
         Row: {
           bot_token: string
