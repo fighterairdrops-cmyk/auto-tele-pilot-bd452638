@@ -1159,9 +1159,9 @@ async function clearPanelState(systemId: string, userId: number) {
 function mainPanelKeyboard(): any[][] {
   return [
     [{ text: "📢 Channels", callback_data: "panel:channels" }, { text: "🚫 Auto-Delete", callback_data: "panel:autodelete" }],
-    [{ text: "🔑 Access", callback_data: "panel:access" }, { text: "👥 Admins", callback_data: "panel:admins" }],
-    [{ text: "📊 Quota", callback_data: "panel:quota" }, { text: "📈 Stats", callback_data: "panel:stats" }],
-    [{ text: "❌ Close", callback_data: "panel:close" }],
+    [{ text: "🛡 Anti Auto-Delete", callback_data: "panel:antidel" }, { text: "🔑 Access", callback_data: "panel:access" }],
+    [{ text: "👥 Admins", callback_data: "panel:admins" }, { text: "📊 Quota", callback_data: "panel:quota" }],
+    [{ text: "📈 Stats", callback_data: "panel:stats" }, { text: "❌ Close", callback_data: "panel:close" }],
   ];
 }
 
@@ -1191,7 +1191,21 @@ async function renderChannelsPanel(systemId: string) {
   const kb: any[][] = rows.slice(0, 10).map(c => [
     { text: `🗑 @${c.username}`, callback_data: `ch:del:${c.id.slice(0, 8)}` },
   ]);
-  kb.push([{ text: "➕ Add channel", callback_data: "ch:add" }]);
+  kb.push([{ text: "➕ Add channels", callback_data: "ch:add" }]);
+  kb.push([{ text: "🔙 Back", callback_data: "panel:main" }, { text: "❌ Close", callback_data: "panel:close" }]);
+  return { text, keyboard: kb };
+}
+
+async function renderAntiDelPanel(systemId: string) {
+  const { data } = await supabase.from("anti_auto_delete_channels").select("id, chat_id").eq("system_id", systemId).order("created_at");
+  const rows = (data || []) as any[];
+  const text = rows.length
+    ? `🛡 <b>Anti Auto-Delete (${rows.length})</b>\n\n` + rows.map(r => `• <code>${escapeHtml(r.chat_id)}</code>`).join("\n") + `\n\n<i>Posts made by the bot in these channels will NEVER be auto-deleted, even if an auto-delete rule matches.</i>`
+    : `🛡 <b>No protected channels.</b>\n\nAdd channels here to exclude them from auto-delete. Bot posts in these channels stay permanently.`;
+  const kb: any[][] = rows.slice(0, 10).map(r => [
+    { text: `🗑 ${r.chat_id}`, callback_data: `anti:del:${r.id.slice(0, 8)}` },
+  ]);
+  kb.push([{ text: "➕ Add channels", callback_data: "anti:add" }]);
   kb.push([{ text: "🔙 Back", callback_data: "panel:main" }, { text: "❌ Close", callback_data: "panel:close" }]);
   return { text, keyboard: kb };
 }
@@ -1325,9 +1339,11 @@ async function handleCallbackQuery(botToken: string, system: any, cb: any) {
     return edit("✅ Panel closed.", [[{ text: "🛠 Open again", callback_data: "panel:main" }]]);
   }
 
+  if (data === "panel:antidel") { const r = await renderAntiDelPanel(system.id); return edit(r.text, r.keyboard); }
+
   if (data === "ch:add") {
     await setPanelState(system.id, userId, chatId, "add_channel");
-    return edit("➕ Send the channel username (e.g. <code>@mychannel</code>) as your next message.\n\nSend /cancel to abort.", [[{ text: "🔙 Back", callback_data: "panel:channels" }]]);
+    return edit("➕ Send one or more channel usernames as your next message.\nSeparate with spaces, commas, or new lines.\n\nExample:\n<code>@chan1 @chan2 @chan3</code>\n\n/cancel to abort.", [[{ text: "🔙 Back", callback_data: "panel:channels" }]]);
   }
   if (data.startsWith("ch:del:")) {
     const prefix = data.slice("ch:del:".length);
@@ -1346,6 +1362,17 @@ async function handleCallbackQuery(botToken: string, system: any, cb: any) {
     const match = (rows || []).find((r: any) => r.id.startsWith(prefix));
     if (match) await supabase.from("auto_delete_rules").delete().eq("id", match.id);
     const r = await renderAutoDeletePanel(system.id); return edit(r.text, r.keyboard);
+  }
+  if (data === "anti:add") {
+    await setPanelState(system.id, userId, chatId, "add_antidel");
+    return edit("🛡 Send one or more channels/chat IDs to protect from auto-delete.\nSeparate with spaces, commas, or new lines.\n\nExamples:\n<code>@chan1 @chan2</code>\n<code>-1001234567890</code>\n\n/cancel to abort.", [[{ text: "🔙 Back", callback_data: "panel:antidel" }]]);
+  }
+  if (data.startsWith("anti:del:")) {
+    const prefix = data.slice("anti:del:".length);
+    const { data: rows } = await supabase.from("anti_auto_delete_channels").select("id").eq("system_id", system.id);
+    const match = (rows || []).find((r: any) => r.id.startsWith(prefix));
+    if (match) await supabase.from("anti_auto_delete_channels").delete().eq("id", match.id);
+    const r = await renderAntiDelPanel(system.id); return edit(r.text, r.keyboard);
   }
   if (data === "adm:add") {
     await setPanelState(system.id, userId, chatId, "add_admin");
@@ -1387,14 +1414,44 @@ async function handlePendingPanelInput(botToken: string, system: any, chatId: nu
   };
 
   if (state.action === "add_channel") {
-    const uname = text.trim().replace(/^@/, "").toLowerCase();
-    if (!/^[a-z0-9_]{3,}$/i.test(uname)) {
-      await sendTelegramMessage(botToken, chatId, "❌ Invalid username. Try again or /cancel.");
+    const tokens = text.split(/[\s,\n]+/).map(t => t.trim().replace(/^@/, "").toLowerCase()).filter(Boolean);
+    const valid: string[] = [];
+    const invalid: string[] = [];
+    for (const t of tokens) {
+      if (/^[a-z0-9_]{3,}$/i.test(t)) valid.push(t); else invalid.push(t);
+    }
+    if (valid.length === 0) {
+      await sendTelegramMessage(botToken, chatId, "❌ No valid usernames found. Try again or /cancel.");
       return true;
     }
-    const { error } = await supabase.from("channels").insert({ system_id: system.id, username: uname });
-    if (error) return respond("❌ Could not add (maybe duplicate).", () => renderChannelsPanel(system.id));
-    return respond(`✅ Channel @${uname} added.`, () => renderChannelsPanel(system.id));
+    const { data: existing } = await supabase.from("channels").select("username").eq("system_id", system.id);
+    const existingSet = new Set((existing || []).map((r: any) => r.username.toLowerCase()));
+    const toInsert = valid.filter(v => !existingSet.has(v));
+    const skipped = valid.filter(v => existingSet.has(v));
+    let added: string[] = [];
+    if (toInsert.length) {
+      const { data: inserted, error } = await supabase.from("channels").insert(toInsert.map(u => ({ system_id: system.id, username: u }))).select("username");
+      if (!error) added = (inserted || []).map((r: any) => `@${r.username}`);
+    }
+    let msg = added.length ? `✅ Added: ${added.join(", ")}` : "ℹ️ Nothing new added.";
+    if (skipped.length) msg += `\n⚠️ Already existed: ${skipped.map(s => `@${s}`).join(", ")}`;
+    if (invalid.length) msg += `\n❌ Invalid: ${invalid.join(", ")}`;
+    return respond(msg, () => renderChannelsPanel(system.id));
+  }
+
+  if (state.action === "add_antidel") {
+    const tokens = text.split(/[\s,\n]+/).map(t => t.trim()).filter(Boolean);
+    if (tokens.length === 0) {
+      await sendTelegramMessage(botToken, chatId, "❌ Send at least one channel. Try again or /cancel.");
+      return true;
+    }
+    const normalized = tokens.map(t => t.startsWith("-") || /^\d+$/.test(t) ? t : (t.startsWith("@") ? t : `@${t}`));
+    const rows = normalized.map(c => ({ system_id: system.id, chat_id: c }));
+    const { data: inserted, error } = await supabase.from("anti_auto_delete_channels").upsert(rows, { onConflict: "system_id,chat_id", ignoreDuplicates: true } as any).select("chat_id");
+    const added = (inserted || []).map((r: any) => r.chat_id);
+    let msg = added.length ? `✅ Protected: ${added.join(", ")}` : "ℹ️ Nothing new added (all already protected).";
+    if (error && added.length === 0) msg = "❌ Could not add.";
+    return respond(msg, () => renderAntiDelPanel(system.id));
   }
 
   if (state.action === "add_autodelete") {
