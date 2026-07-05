@@ -1424,14 +1424,18 @@ async function handlePendingPanelInput(botToken: string, system: any, chatId: nu
       await sendTelegramMessage(botToken, chatId, "❌ No valid usernames found. Try again or /cancel.");
       return true;
     }
-    const rows = valid.map(u => ({ system_id: system.id, username: u }));
-    const { data: inserted, error } = await supabase.from("channels").upsert(rows, { onConflict: "system_id,username", ignoreDuplicates: true } as any).select("username");
-    const added = (inserted || []).map((r: any) => `@${r.username}`);
-    const skipped = valid.filter(v => !added.some(a => a === `@${v}`));
+    const { data: existing } = await supabase.from("channels").select("username").eq("system_id", system.id);
+    const existingSet = new Set((existing || []).map((r: any) => r.username.toLowerCase()));
+    const toInsert = valid.filter(v => !existingSet.has(v));
+    const skipped = valid.filter(v => existingSet.has(v));
+    let added: string[] = [];
+    if (toInsert.length) {
+      const { data: inserted, error } = await supabase.from("channels").insert(toInsert.map(u => ({ system_id: system.id, username: u }))).select("username");
+      if (!error) added = (inserted || []).map((r: any) => `@${r.username}`);
+    }
     let msg = added.length ? `✅ Added: ${added.join(", ")}` : "ℹ️ Nothing new added.";
     if (skipped.length) msg += `\n⚠️ Already existed: ${skipped.map(s => `@${s}`).join(", ")}`;
     if (invalid.length) msg += `\n❌ Invalid: ${invalid.join(", ")}`;
-    if (error && added.length === 0) msg = "❌ Could not add channels.";
     return respond(msg, () => renderChannelsPanel(system.id));
   }
 
