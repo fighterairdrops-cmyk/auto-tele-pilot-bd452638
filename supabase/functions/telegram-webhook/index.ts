@@ -1191,7 +1191,21 @@ async function renderChannelsPanel(systemId: string) {
   const kb: any[][] = rows.slice(0, 10).map(c => [
     { text: `🗑 @${c.username}`, callback_data: `ch:del:${c.id.slice(0, 8)}` },
   ]);
-  kb.push([{ text: "➕ Add channel", callback_data: "ch:add" }]);
+  kb.push([{ text: "➕ Add channels", callback_data: "ch:add" }]);
+  kb.push([{ text: "🔙 Back", callback_data: "panel:main" }, { text: "❌ Close", callback_data: "panel:close" }]);
+  return { text, keyboard: kb };
+}
+
+async function renderAntiDelPanel(systemId: string) {
+  const { data } = await supabase.from("anti_auto_delete_channels").select("id, chat_id").eq("system_id", systemId).order("created_at");
+  const rows = (data || []) as any[];
+  const text = rows.length
+    ? `🛡 <b>Anti Auto-Delete (${rows.length})</b>\n\n` + rows.map(r => `• <code>${escapeHtml(r.chat_id)}</code>`).join("\n") + `\n\n<i>Posts made by the bot in these channels will NEVER be auto-deleted, even if an auto-delete rule matches.</i>`
+    : `🛡 <b>No protected channels.</b>\n\nAdd channels here to exclude them from auto-delete. Bot posts in these channels stay permanently.`;
+  const kb: any[][] = rows.slice(0, 10).map(r => [
+    { text: `🗑 ${r.chat_id}`, callback_data: `anti:del:${r.id.slice(0, 8)}` },
+  ]);
+  kb.push([{ text: "➕ Add channels", callback_data: "anti:add" }]);
   kb.push([{ text: "🔙 Back", callback_data: "panel:main" }, { text: "❌ Close", callback_data: "panel:close" }]);
   return { text, keyboard: kb };
 }
