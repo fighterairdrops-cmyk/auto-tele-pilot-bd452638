@@ -262,7 +262,8 @@ serve(async (req) => {
         if (!sendResult.ok) continue;
         success++;
         if (sendResult.messageId) {
-          const delayMs = resolveAutoDeleteDelay(rules, channelChatId);
+          const isExcluded = excluded.has(normalizeChatKey(channelChatId));
+          const delayMs = isExcluded ? null : resolveAutoDeleteDelay(rules, channelChatId);
           if (delayMs) {
             await queuePendingDeletion(botToken, channelChatId, sendResult.messageId, delayMs);
           }
