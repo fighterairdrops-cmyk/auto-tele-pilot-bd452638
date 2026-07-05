@@ -247,6 +247,13 @@ serve(async (req) => {
         .eq("enabled", true);
       const rules = autoDeleteRules || [];
 
+      // Load anti-auto-delete exclusion list (channels never auto-deleted)
+      const { data: antiRows } = await supabase
+        .from("anti_auto_delete_channels")
+        .select("chat_id")
+        .eq("system_id", post.system_id);
+      const excluded = new Set((antiRows || []).map((r: any) => normalizeChatKey(r.chat_id)));
+
       // Send to channels using resolved (possibly rotated) content
       let success = 0;
       for (const ch of channels) {
