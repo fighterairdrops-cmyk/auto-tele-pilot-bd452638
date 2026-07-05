@@ -75,6 +75,35 @@ export type Database = {
           },
         ]
       }
+      anti_auto_delete_channels: {
+        Row: {
+          chat_id: string
+          created_at: string
+          id: string
+          system_id: string
+        }
+        Insert: {
+          chat_id: string
+          created_at?: string
+          id?: string
+          system_id: string
+        }
+        Update: {
+          chat_id?: string
+          created_at?: string
+          id?: string
+          system_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "anti_auto_delete_channels_system_id_fkey"
+            columns: ["system_id"]
+            isOneToOne: false
+            referencedRelation: "systems"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       auto_delete_rules: {
         Row: {
           chat_id: string
