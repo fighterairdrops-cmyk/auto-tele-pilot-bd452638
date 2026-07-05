@@ -1339,9 +1339,11 @@ async function handleCallbackQuery(botToken: string, system: any, cb: any) {
     return edit("✅ Panel closed.", [[{ text: "🛠 Open again", callback_data: "panel:main" }]]);
   }
 
+  if (data === "panel:antidel") { const r = await renderAntiDelPanel(system.id); return edit(r.text, r.keyboard); }
+
   if (data === "ch:add") {
     await setPanelState(system.id, userId, chatId, "add_channel");
-    return edit("➕ Send the channel username (e.g. <code>@mychannel</code>) as your next message.\n\nSend /cancel to abort.", [[{ text: "🔙 Back", callback_data: "panel:channels" }]]);
+    return edit("➕ Send one or more channel usernames as your next message.\nSeparate with spaces, commas, or new lines.\n\nExample:\n<code>@chan1 @chan2 @chan3</code>\n\n/cancel to abort.", [[{ text: "🔙 Back", callback_data: "panel:channels" }]]);
   }
   if (data.startsWith("ch:del:")) {
     const prefix = data.slice("ch:del:".length);
