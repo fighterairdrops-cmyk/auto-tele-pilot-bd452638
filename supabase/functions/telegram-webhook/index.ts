@@ -1363,6 +1363,17 @@ async function handleCallbackQuery(botToken: string, system: any, cb: any) {
     if (match) await supabase.from("auto_delete_rules").delete().eq("id", match.id);
     const r = await renderAutoDeletePanel(system.id); return edit(r.text, r.keyboard);
   }
+  if (data === "anti:add") {
+    await setPanelState(system.id, userId, chatId, "add_antidel");
+    return edit("🛡 Send one or more channels/chat IDs to protect from auto-delete.\nSeparate with spaces, commas, or new lines.\n\nExamples:\n<code>@chan1 @chan2</code>\n<code>-1001234567890</code>\n\n/cancel to abort.", [[{ text: "🔙 Back", callback_data: "panel:antidel" }]]);
+  }
+  if (data.startsWith("anti:del:")) {
+    const prefix = data.slice("anti:del:".length);
+    const { data: rows } = await supabase.from("anti_auto_delete_channels").select("id").eq("system_id", system.id);
+    const match = (rows || []).find((r: any) => r.id.startsWith(prefix));
+    if (match) await supabase.from("anti_auto_delete_channels").delete().eq("id", match.id);
+    const r = await renderAntiDelPanel(system.id); return edit(r.text, r.keyboard);
+  }
   if (data === "adm:add") {
     await setPanelState(system.id, userId, chatId, "add_admin");
     return edit("➕ Send the Telegram user ID of the new bot admin.\n\n/cancel to abort.", [[{ text: "🔙 Back", callback_data: "panel:admins" }]]);
