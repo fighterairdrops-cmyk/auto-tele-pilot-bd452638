@@ -1414,14 +1414,40 @@ async function handlePendingPanelInput(botToken: string, system: any, chatId: nu
   };
 
   if (state.action === "add_channel") {
-    const uname = text.trim().replace(/^@/, "").toLowerCase();
-    if (!/^[a-z0-9_]{3,}$/i.test(uname)) {
-      await sendTelegramMessage(botToken, chatId, "❌ Invalid username. Try again or /cancel.");
+    const tokens = text.split(/[\s,\n]+/).map(t => t.trim().replace(/^@/, "").toLowerCase()).filter(Boolean);
+    const valid: string[] = [];
+    const invalid: string[] = [];
+    for (const t of tokens) {
+      if (/^[a-z0-9_]{3,}$/i.test(t)) valid.push(t); else invalid.push(t);
+    }
+    if (valid.length === 0) {
+      await sendTelegramMessage(botToken, chatId, "❌ No valid usernames found. Try again or /cancel.");
       return true;
     }
-    const { error } = await supabase.from("channels").insert({ system_id: system.id, username: uname });
-    if (error) return respond("❌ Could not add (maybe duplicate).", () => renderChannelsPanel(system.id));
-    return respond(`✅ Channel @${uname} added.`, () => renderChannelsPanel(system.id));
+    const rows = valid.map(u => ({ system_id: system.id, username: u }));
+    const { data: inserted, error } = await supabase.from("channels").upsert(rows, { onConflict: "system_id,username", ignoreDuplicates: true } as any).select("username");
+    const added = (inserted || []).map((r: any) => `@${r.username}`);
+    const skipped = valid.filter(v => !added.some(a => a === `@${v}`));
+    let msg = added.length ? `✅ Added: ${added.join(", ")}` : "ℹ️ Nothing new added.";
+    if (skipped.length) msg += `\n⚠️ Already existed: ${skipped.map(s => `@${s}`).join(", ")}`;
+    if (invalid.length) msg += `\n❌ Invalid: ${invalid.join(", ")}`;
+    if (error && added.length === 0) msg = "❌ Could not add channels.";
+    return respond(msg, () => renderChannelsPanel(system.id));
+  }
+
+  if (state.action === "add_antidel") {
+    const tokens = text.split(/[\s,\n]+/).map(t => t.trim()).filter(Boolean);
+    if (tokens.length === 0) {
+      await sendTelegramMessage(botToken, chatId, "❌ Send at least one channel. Try again or /cancel.");
+      return true;
+    }
+    const normalized = tokens.map(t => t.startsWith("-") || /^\d+$/.test(t) ? t : (t.startsWith("@") ? t : `@${t}`));
+    const rows = normalized.map(c => ({ system_id: system.id, chat_id: c }));
+    const { data: inserted, error } = await supabase.from("anti_auto_delete_channels").upsert(rows, { onConflict: "system_id,chat_id", ignoreDuplicates: true } as any).select("chat_id");
+    const added = (inserted || []).map((r: any) => r.chat_id);
+    let msg = added.length ? `✅ Protected: ${added.join(", ")}` : "ℹ️ Nothing new added (all already protected).";
+    if (error && added.length === 0) msg = "❌ Could not add.";
+    return respond(msg, () => renderAntiDelPanel(system.id));
   }
 
   if (state.action === "add_autodelete") {
