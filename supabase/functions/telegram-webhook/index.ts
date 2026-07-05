@@ -1159,9 +1159,9 @@ async function clearPanelState(systemId: string, userId: number) {
 function mainPanelKeyboard(): any[][] {
   return [
     [{ text: "📢 Channels", callback_data: "panel:channels" }, { text: "🚫 Auto-Delete", callback_data: "panel:autodelete" }],
-    [{ text: "🔑 Access", callback_data: "panel:access" }, { text: "👥 Admins", callback_data: "panel:admins" }],
-    [{ text: "📊 Quota", callback_data: "panel:quota" }, { text: "📈 Stats", callback_data: "panel:stats" }],
-    [{ text: "❌ Close", callback_data: "panel:close" }],
+    [{ text: "🛡 Anti Auto-Delete", callback_data: "panel:antidel" }, { text: "🔑 Access", callback_data: "panel:access" }],
+    [{ text: "👥 Admins", callback_data: "panel:admins" }, { text: "📊 Quota", callback_data: "panel:quota" }],
+    [{ text: "📈 Stats", callback_data: "panel:stats" }, { text: "❌ Close", callback_data: "panel:close" }],
   ];
 }
 
