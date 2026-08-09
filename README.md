@@ -1,73 +1,64 @@
-# Welcome to your Lovable project
+# Telegram Mastermind
 
-## Project info
+​Project Title: Universal Telegram Automation Controller (Bot & UserBot Hybrid)
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+​"Build a high-end React dashboard (Shadcn/Tailwind) to manage automated Telegram posting. The system must support two modes: 'Bot Mode' (via Webhook) and 'Account Mode' (via external Python/MTProto).
 
-## How can I edit this code?
+​1. Dual-Engine Configuration Page:
 
-There are several ways of editing your application.
+​Bot Settings: Fields for BOT_TOKEN and Webhook URL.
 
-**Use Lovable**
+​Account Settings: Fields for API_ID, API_HASH, and STRING_SESSION.
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+​Status Toggle: A switch to select which 'Engine' is currently active for posting.
 
-Changes made via Lovable will be committed automatically to this repo.
+​2. Access Control System (The /access logic):
 
-**Use your preferred IDE**
+​Admin Table: Add/Remove Main Admin Telegram IDs.
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+​Permission Mapping: A searchable table showing: User_ID | Assigned_Channels | Expiry_Time.
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+​This table must update when the /access command is used in the authorized Group Chat.
 
-Follow these steps:
+​3. Advanced Scheduler (The /post logic):
+
+​Task Queue: A UI component that tracks active /post everyX timeY jobs.
+
+​Fields: Message Content (Text/Media), Interval (Minutes), Remaining Cycles, and 'Delete After' timer.
+
+​Logic: When a command is received, create a new row in a post_queue table.
+
+​4. The 'Auto-Delete' Monitor:
+
+​Create a view that lists all posts made by the system that are pending deletion.
+
+​Include a countdown timer for each post based on the 'Delete Duration' setting.
+
+​5. Group Chat Integration:
+
+​A setting to define 'Authorized Group IDs'. The system must ignore commands from any other chat.
+
+​Log all incoming commands in a 'Live Feed' style component."
+
+This project was built with [Lovable](https://lovable.dev).
+
+**Live app**: https://auto-tele-pilot.lovable.app
+
+## Build with Lovable
+
+Continue developing this project in the [Lovable editor](https://lovable.dev/projects/9bf88330-d149-4b29-9ff2-95a06e4ad48d).
+
+- **Ship faster**: describe what you want to build and Lovable handles the code.
+- **Stay in sync**: every change made in Lovable is committed straight to this repository.
+- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
+
+## Development
+
+Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
+git clone <this-repository-url>
+cd <repository-name>
 npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
 npm run dev
 ```
-
-**Edit a file directly in GitHub**
-
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
-
-**Use GitHub Codespaces**
-
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
-
-## What technologies are used for this project?
-
-This project is built with:
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
