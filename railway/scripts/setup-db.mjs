@@ -12,8 +12,10 @@ if (!connectionString) {
   process.exit(1);
 }
 
-const needsSsl = !/localhost|127\.0\.0\.1|\.railway\.internal/.test(connectionString);
-const client = new pg.Client({ connectionString, ssl: needsSsl ? { rejectUnauthorized: false } : undefined });
+const sslMode = (connectionString.match(/[?&]sslmode=([^&]+)/)?.[1] || process.env.PGSSLMODE || "").toLowerCase();
+const isLocal = /@(localhost|127\.0\.0\.1|\[::1\])|\.railway\.internal|host=\/|@\//.test(connectionString);
+const needsSsl = sslMode ? sslMode !== "disable" : !isLocal;
+const client = new pg.Client({ connectionString, ssl: needsSsl ? { rejectUnauthorized: false } : false });
 
 await client.connect();
 await client.query(sql);
