@@ -16,13 +16,17 @@ if (!connectionString) {
   throw new Error("DATABASE_URL is not set. Add the Railway Postgres connection string.");
 }
 
-const needsSsl = !/localhost|127\.0\.0\.1|\.railway\.internal/.test(connectionString);
+// SSL: honour ?sslmode= / PGSSLMODE, otherwise enable it for non-local hosts.
+const sslMode = (connectionString.match(/[?&]sslmode=([^&]+)/)?.[1] || process.env.PGSSLMODE || "").toLowerCase();
+const isLocal = /@(localhost|127\.0\.0\.1|\[::1\])|\.railway\.internal|host=\/|@\//.test(connectionString);
+const needsSsl = sslMode ? sslMode !== "disable" : !isLocal;
 
 export const pool = new pg.Pool({
   connectionString,
   max: Number(process.env.PG_POOL_MAX || 8),
-  ssl: needsSsl ? { rejectUnauthorized: false } : undefined,
+  ssl: needsSsl ? { rejectUnauthorized: false } : false,
 });
+
 
 pool.on("error", (err) => console.error("pg pool error:", err.message));
 
