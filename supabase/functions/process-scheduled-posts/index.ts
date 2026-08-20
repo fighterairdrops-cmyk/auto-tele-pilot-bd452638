@@ -299,9 +299,12 @@ serve(async (req) => {
         })
         .eq("id", post.id);
 
-      // Notify user and queue auto-delete for the notification too
-      if (success > 0) {
-        const notifyText = `📤 Post ${newTimesSent}/${post.total_times} sent to ${success} channel(s).${isComplete ? " ✅ Complete!" : ""}`;
+      // Notify only twice per schedule (first send + final send) to cut usage
+      const shouldNotify = success > 0 && (newTimesSent === 1 || isComplete);
+      if (shouldNotify) {
+        const notifyText = isComplete
+          ? `✅ Schedule complete — ${newTimesSent}/${post.total_times} posts sent (last one to ${success} channel(s)).`
+          : `📤 Schedule started — post 1/${post.total_times} sent to ${success} channel(s). Next updates: only when it finishes.`;
         const notifyResult = await sendText(botToken, post.chat_id, notifyText);
 
         if (notifyResult.ok && notifyResult.messageId) {
@@ -311,6 +314,7 @@ serve(async (req) => {
           }
         }
       }
+
 
       processed++;
     }
