@@ -244,20 +244,29 @@ serve(async (req) => {
         }
       }
 
-      // Load enabled auto-delete rules once per post run
-      const { data: autoDeleteRules } = await supabase
-        .from("auto_delete_rules")
-        .select("chat_id, delay")
-        .eq("system_id", post.system_id)
-        .eq("enabled", true);
-      const rules = autoDeleteRules || [];
+      // Load enabled auto-delete rules (cached per system for this run)
+      let rules = rulesCache.get(post.system_id);
+      if (!rules) {
+        const { data: autoDeleteRules } = await supabase
+          .from("auto_delete_rules")
+          .select("chat_id, delay")
+          .eq("system_id", post.system_id)
+          .eq("enabled", true);
+        rules = autoDeleteRules || [];
+        rulesCache.set(post.system_id, rules);
+      }
 
-      // Load anti-auto-delete exclusion list (channels never auto-deleted)
-      const { data: antiRows } = await supabase
-        .from("anti_auto_delete_channels")
-        .select("chat_id")
-        .eq("system_id", post.system_id);
-      const excluded = new Set((antiRows || []).map((r: any) => normalizeChatKey(r.chat_id)));
+      // Load anti-auto-delete exclusion list (cached per system for this run)
+      let excluded = antiCache.get(post.system_id);
+      if (!excluded) {
+        const { data: antiRows } = await supabase
+          .from("anti_auto_delete_channels")
+          .select("chat_id")
+          .eq("system_id", post.system_id);
+        excluded = new Set((antiRows || []).map((r: any) => normalizeChatKey(r.chat_id)));
+        antiCache.set(post.system_id, excluded);
+      }
+
 
       // Send to channels using resolved (possibly rotated) content
       let success = 0;
