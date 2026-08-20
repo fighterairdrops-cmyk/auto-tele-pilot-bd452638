@@ -181,6 +181,11 @@ serve(async (req) => {
     let processed = 0;
     const nowHour = new Date().getUTCHours();
 
+    // Per-run caches so repeated posts of the same system don't re-query the DB
+    const rulesCache = new Map<string, Array<{ chat_id: string; delay: string }>>();
+    const antiCache = new Map<string, Set<string>>();
+
+
     for (const post of posts) {
       const botToken = (post as any).systems?.bot_token;
       if (!botToken) continue;
