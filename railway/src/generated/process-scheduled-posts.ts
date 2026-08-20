@@ -184,6 +184,11 @@ serve(async (req) => {
     let processed = 0;
     const nowHour = new Date().getUTCHours();
 
+    // Per-run caches so repeated posts of the same system don't re-query the DB
+    const rulesCache = new Map<string, Array<{ chat_id: string; delay: string }>>();
+    const antiCache = new Map<string, Set<string>>();
+
+
     for (const post of posts) {
       const botToken = (post as any).systems?.bot_token;
       if (!botToken) continue;
@@ -242,20 +247,29 @@ serve(async (req) => {
         }
       }
 
-      // Load enabled auto-delete rules once per post run
-      const { data: autoDeleteRules } = await supabase
-        .from("auto_delete_rules")
-        .select("chat_id, delay")
-        .eq("system_id", post.system_id)
-        .eq("enabled", true);
-      const rules = autoDeleteRules || [];
+      // Load enabled auto-delete rules (cached per system for this run)
+      let rules = rulesCache.get(post.system_id);
+      if (!rules) {
+        const { data: autoDeleteRules } = await supabase
+          .from("auto_delete_rules")
+          .select("chat_id, delay")
+          .eq("system_id", post.system_id)
+          .eq("enabled", true);
+        rules = autoDeleteRules || [];
+        rulesCache.set(post.system_id, rules);
+      }
 
-      // Load anti-auto-delete exclusion list (channels never auto-deleted)
-      const { data: antiRows } = await supabase
-        .from("anti_auto_delete_channels")
-        .select("chat_id")
-        .eq("system_id", post.system_id);
-      const excluded = new Set((antiRows || []).map((r: any) => normalizeChatKey(r.chat_id)));
+      // Load anti-auto-delete exclusion list (cached per system for this run)
+      let excluded = antiCache.get(post.system_id);
+      if (!excluded) {
+        const { data: antiRows } = await supabase
+          .from("anti_auto_delete_channels")
+          .select("chat_id")
+          .eq("system_id", post.system_id);
+        excluded = new Set((antiRows || []).map((r: any) => normalizeChatKey(r.chat_id)));
+        antiCache.set(post.system_id, excluded);
+      }
+
 
       // Send to channels using resolved (possibly rotated) content
       let success = 0;
@@ -288,9 +302,12 @@ serve(async (req) => {
         })
         .eq("id", post.id);
 
-      // Notify user and queue auto-delete for the notification too
-      if (success > 0) {
-        const notifyText = `📤 Post ${newTimesSent}/${post.total_times} sent to ${success} channel(s).${isComplete ? " ✅ Complete!" : ""}`;
+      // Notify only twice per schedule (first send + final send) to cut usage
+      const shouldNotify = success > 0 && (newTimesSent === 1 || isComplete);
+      if (shouldNotify) {
+        const notifyText = isComplete
+          ? `✅ Schedule complete — ${newTimesSent}/${post.total_times} posts sent (last one to ${success} channel(s)).`
+          : `📤 Schedule started — post 1/${post.total_times} sent to ${success} channel(s). Next updates: only when it finishes.`;
         const notifyResult = await sendText(botToken, post.chat_id, notifyText);
 
         if (notifyResult.ok && notifyResult.messageId) {
@@ -300,6 +317,7 @@ serve(async (req) => {
           }
         }
       }
+
 
       processed++;
     }

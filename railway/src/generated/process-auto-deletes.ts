@@ -28,8 +28,8 @@ serve(async (_req) => {
       return new Response(JSON.stringify({ ok: true, deleted: 0 }));
     }
 
-    console.log(`Processing ${pending.length} pending deletions`);
     let deleted = 0;
+    const doneIds: string[] = [];
 
     for (const item of pending) {
       try {
@@ -39,7 +39,7 @@ serve(async (_req) => {
           body: JSON.stringify({ chat_id: item.chat_id, message_id: item.message_id }),
         });
         const result = await res.json();
-        
+
         if (result.ok) {
           deleted++;
         } else {
@@ -50,8 +50,14 @@ serve(async (_req) => {
       }
 
       // Remove from queue regardless (don't retry failed deletes forever)
-      await supabase.from("pending_deletions").delete().eq("id", item.id);
+      doneIds.push(item.id);
     }
+
+    // Single batched delete instead of one query per message (saves DB round-trips)
+    if (doneIds.length > 0) {
+      await supabase.from("pending_deletions").delete().in("id", doneIds);
+    }
+
 
     return new Response(JSON.stringify({ ok: true, deleted, processed: pending.length }));
   } catch (err) {
